@@ -71,6 +71,9 @@
   .dot.answered { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   .dot.current { outline: 3px solid var(--accent); outline-offset: 1px; }
   .done-box { text-align: center; }
+  .blocker { margin-top: 16px; padding: 12px 16px; border-radius: 10px; background: #fdf3e4;
+             border-left: 4px solid var(--warn); font-size: 17px; }
+  textarea.need { border-color: var(--warn); background: #fffaf2; }
   ul.rules li { margin: 6px 0; }
 </style>
 </head>
@@ -493,6 +496,7 @@ function showItem(part, index) {
       ${item.noConf ? '' : `<div class="work-lbl muted">Насколько ты уверен в ответе?</div>
         <div class="conf">${CONF.map(([v, t]) =>
           `<label><input type="radio" name="conf" value="${v}" ${a.conf === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div>`}
+      <div class="blocker" id="blocker" hidden></div>
       <div class="nav">
         <button class="ghost" id="prev" ${index === 0 ? 'disabled style="visibility:hidden"' : ''}>← Назад</button>
         <button class="main" id="next">${index === part.items.length - 1 ? 'Закончить часть' : 'Дальше →'}</button>
@@ -509,12 +513,48 @@ function showItem(part, index) {
   document.getElementById('back-home').onclick = home;
   document.getElementById('prev').onclick = () => showItem(part, index - 1);
   document.getElementById('next').onclick = () => {
+    if (blocked(item, a)) return;
     if (index === part.items.length - 1) finishPart(part); else showItem(part, index + 1);
   };
-  app.querySelectorAll('.dot').forEach(d => d.onclick = () => showItem(part, +d.dataset.i));
+  // Going back is always allowed; jumping forward passes the same check as "next".
+  app.querySelectorAll('.dot').forEach(d => d.onclick = () => {
+    const to = +d.dataset.i;
+    if (to > index && blocked(item, a)) return;
+    showItem(part, to);
+  });
   const firstInput = app.querySelector('#answer input[type=text], #answer textarea');
   if (firstInput) firstInput.focus();
   window.scrollTo(0, 0);
+}
+
+// The written parts carry the diagnosis: a bare answer can be a guess, the
+// explanation shows where the reasoning broke. "Don't know" is always a way out.
+function blockReason(item, a) {
+  if (a.conf === 'dunno') return null;
+  if (item.type === 'open' && String(a.value ?? '').trim().length < 3)
+    return { text: 'Напиши хотя бы пару слов. Честное «не знаю» или «не могу объяснить» — тоже ответ, и он нам полезен.', field: '#open' };
+  if (item.type === 'scale' && a.value == null)
+    return { text: 'Выбери один вариант — здесь нет правильного ответа.' };
+  if (!isAnswered(item))
+    return { text: 'Впиши ответ. Если не знаешь, как решать, — нажми «Не знаю / не проходили», это нормально.' };
+  if (item.work === 'required' && !String(a.work || '').trim())
+    return { text: 'Напиши коротко, как решал, — хоть одной строкой. Именно по ней видно, где сбилось, ' +
+                   'даже если ответ верный. Например: «перенёс 8 вправо, поделил на 3». ' +
+                   'Можно написать «решал в тетради» и прислать фото.', field: '#work' };
+  return null;
+}
+
+function blocked(item, a) {
+  const box = document.getElementById('blocker');
+  app.querySelectorAll('.need').forEach(el => el.classList.remove('need'));
+  const r = blockReason(item, a);
+  if (!r) { box.hidden = true; return false; }
+  box.textContent = r.text;
+  box.hidden = false;
+  const field = r.field && app.querySelector(r.field);
+  if (field) { field.classList.add('need'); field.focus(); }
+  box.scrollIntoView({ block: 'nearest' });
+  return true;
 }
 
 function refreshDots(part) {
