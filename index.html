@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Алгебра 7: диагностическая работа</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #fff; --ink: #1d2433; --muted: #6b7385;
+    --accent: #3f6ad8; --accent-soft: #e6ecfb; --ok: #2e8b57; --warn: #c9822b; --line: #d8dce6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 18px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 28px; margin: 8px 0 4px; }
+  h2 { font-size: 22px; margin: 0 0 8px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border-radius: 14px; padding: 22px 24px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); margin: 16px 0; }
+  .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .part-btn { text-align: left; border: 2px solid var(--line); background: var(--card); border-radius: 12px;
+              padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; }
+  .part-btn:hover { border-color: var(--accent); }
+  .part-btn b { display: block; font-size: 19px; }
+  .part-btn small { color: var(--muted); }
+  .badge { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 99px;
+           background: var(--accent-soft); color: var(--accent); margin-top: 6px; }
+  .badge.done { background: #e3f4ea; color: var(--ok); }
+  button.main { background: var(--accent); color: #fff; border: 0; border-radius: 10px;
+                padding: 11px 22px; font: inherit; cursor: pointer; }
+  button.main:disabled { opacity: .4; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); border: 2px solid var(--accent);
+                 border-radius: 10px; padding: 9px 18px; font: inherit; cursor: pointer; }
+  .nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  .progress { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 10px 0 4px; }
+  .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
+  .topic { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .q { font-size: 21px; margin: 10px 0 16px; }
+  .sub { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+  .sub .lbl { min-width: 2em; font-weight: 600; }
+  .sub .expr { min-width: 220px; }
+  input[type=text] { font: inherit; padding: 7px 10px; border: 2px solid var(--line); border-radius: 8px; width: 220px; }
+  input[type=text]:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+  textarea { font: inherit; font-size: 17px; width: 100%; min-height: 70px; padding: 8px 10px;
+             border: 2px solid var(--line); border-radius: 8px; resize: vertical; }
+  select { font: inherit; padding: 6px 8px; border: 2px solid var(--line); border-radius: 8px; }
+  .opt { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border: 2px solid var(--line);
+         border-radius: 10px; margin: 8px 0; cursor: pointer; }
+  .opt:hover { border-color: var(--accent); }
+  .opt input { transform: scale(1.3); }
+  .conf { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .conf label { border: 2px solid var(--line); border-radius: 99px; padding: 5px 14px; cursor: pointer; font-size: 16px; }
+  .conf input { display: none; }
+  .conf input:checked + span { font-weight: 700; }
+  .conf label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .work-lbl { margin-top: 16px; font-size: 16px; }
+  .work-lbl.required { color: var(--warn); font-weight: 600; }
+  .fr { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center;
+        font-size: .9em; margin: 0 2px; line-height: 1.15; }
+  .fr > span:first-child { border-bottom: 1.5px solid currentColor; padding: 0 3px; }
+  .fr > span:last-child { padding: 0 3px; }
+  .plane { display: block; margin: 8px 0; max-width: 100%; height: auto; touch-action: manipulation; }
+  .plane.clickable { cursor: crosshair; }
+  .hint { font-size: 15px; color: var(--muted); }
+  table.tbl { border-collapse: collapse; margin: 8px 0; }
+  table.tbl td, table.tbl th { border: 1.5px solid var(--line); padding: 6px 14px; text-align: center; }
+  .dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .dot { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); background: var(--card);
+         font-size: 13px; cursor: pointer; padding: 0; color: var(--muted); }
+  .dot.answered { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .dot.current { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .done-box { text-align: center; }
+  ul.rules li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+
+<script>
+"use strict";
+
+// ---------- helpers for writing maths ----------
+const fr = (a, b) => `<span class="fr"><span>${a}</span><span>${b}</span></span>`;
+const M = '−'; // typographic minus
+
+// Coordinate plane as SVG. Options:
+//   min, max     — axis range (same for x and y)
+//   lines        — [{k, b, color, label}] straight lines y = kx + b
+//   poly         — [[x, y], ...] broken line
+//   points       — [{x, y, label}]
+//   id           — svg id (for clickable planes)
+function plane(o) {
+  const min = o.min ?? -6, max = o.max ?? 6, u = o.unit ?? 30;
+  const size = (max - min) * u + 2 * u;
+  const X = x => (x - min + 1) * u, Y = y => (max - y + 1) * u;
+  let s = `<svg class="plane${o.clickable ? ' clickable' : ''}" ${o.id ? `id="${o.id}"` : ''}
+             viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"
+             data-min="${min}" data-max="${max}" data-unit="${u}">`;
+  s += `<rect x="0" y="0" width="${size}" height="${size}" fill="#fff"/>`;
+  for (let i = min; i <= max; i++) {
+    s += `<line x1="${X(i)}" y1="${Y(min)}" x2="${X(i)}" y2="${Y(max)}" stroke="#e3e7ef"/>`;
+    s += `<line x1="${X(min)}" y1="${Y(i)}" x2="${X(max)}" y2="${Y(i)}" stroke="#e3e7ef"/>`;
+  }
+  s += `<line x1="${X(min) - 8}" y1="${Y(0)}" x2="${X(max) + 14}" y2="${Y(0)}" stroke="#333" stroke-width="1.5"/>`;
+  s += `<line x1="${X(0)}" y1="${Y(min) + 8}" x2="${X(0)}" y2="${Y(max) - 14}" stroke="#333" stroke-width="1.5"/>`;
+  s += `<text x="${X(max) + 6}" y="${Y(0) - 8}" font-size="15" font-style="italic">x</text>`;
+  s += `<text x="${X(0) + 8}" y="${Y(max) - 4}" font-size="15" font-style="italic">y</text>`;
+  s += `<text x="${X(0) - 13}" y="${Y(0) + 16}" font-size="13">0</text>`;
+  s += `<text x="${X(1) - 4}" y="${Y(0) + 16}" font-size="13">1</text>`;
+  s += `<text x="${X(0) - 13}" y="${Y(1) + 5}" font-size="13">1</text>`;
+  for (const l of o.lines || []) {
+    const x1 = min, x2 = max;
+    s += `<line x1="${X(x1)}" y1="${Y(l.k * x1 + l.b)}" x2="${X(x2)}" y2="${Y(l.k * x2 + l.b)}"
+            stroke="${l.color}" stroke-width="2.5" clip-path="url(#clip${o.id || ''})"/>`;
+    if (l.label) s += `<text x="${X(l.lx)}" y="${Y(l.ly)}" font-size="17" font-weight="700" fill="${l.color}">${l.label}</text>`;
+  }
+  if (o.poly) {
+    s += `<polyline fill="none" stroke="#3f6ad8" stroke-width="2.5" points="${o.poly.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')}"/>`;
+    for (const [x, y] of [o.poly[0], o.poly[o.poly.length - 1]])
+      s += `<circle cx="${X(x)}" cy="${Y(y)}" r="4" fill="#3f6ad8"/>`;
+  }
+  for (const p of o.points || []) {
+    s += `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="5" fill="#c0392b"/>`;
+    s += `<text x="${X(p.x) + 7}" y="${Y(p.y) - 7}" font-size="17" font-weight="700" fill="#c0392b">${p.label}</text>`;
+  }
+  s += `<defs><clipPath id="clip${o.id || ''}"><rect x="${X(min)}" y="${Y(max)}" width="${(max - min) * u}" height="${(max - min) * u}"/></clipPath></defs>`;
+  s += `<g class="marks"></g></svg>`;
+  return s;
+}
+
+function numberLine() {
+  const u = 90, x0 = 40;
+  let s = `<svg class="plane" viewBox="0 0 560 70" width="560" height="70" xmlns="http://www.w3.org/2000/svg">`;
+  s += `<line x1="10" y1="35" x2="550" y2="35" stroke="#333" stroke-width="1.5"/>`;
+  for (let i = 0; i <= 5; i++) {
+    const x = x0 + i * u;
+    s += `<line x1="${x}" y1="${i % 5 === 0 ? 24 : 28}" x2="${x}" y2="${i % 5 === 0 ? 46 : 42}" stroke="#333" stroke-width="1.5"/>`;
+  }
+  s += `<text x="${x0 - 5}" y="64" font-size="16">0</text><text x="${x0 + 5 * u - 5}" y="64" font-size="16">1</text>`;
+  s += `<circle cx="${x0 + 3 * u}" cy="35" r="6" fill="#c0392b"/><text x="${x0 + 3 * u - 6}" y="18" font-size="17" font-weight="700" fill="#c0392b">A</text>`;
+  return s + `</svg>`;
+}
+
+// ---------- the test ----------
+// type: text (fields), choice (options, multi), grid (clickable plane), open (textarea only), scale
+// work: 'required' — "write how you solved it" is asked explicitly
+const PARTS = [
+  {
+    id: 'p1', title: 'Часть 1. Фундамент', minutes: '30–35 минут',
+    about: 'Арифметика 5–6 класса, на которой стоит вся алгебра: дроби, отрицательные числа, порядок действий, координаты.',
+    items: [
+      { id: 'A0', topic: 'Сначала о тебе', type: 'scale', noConf: true,
+        q: 'Насколько тебе сейчас понятна алгебра на уроках?',
+        options: ['1 — совсем непонятно', '2', '3 — что-то понятно, что-то нет', '4', '5 — всё понятно'] },
+      { id: 'A1', topic: 'Сначала о тебе', type: 'open', noConf: true,
+        q: 'В какой момент на уроке или дома становится непонятно? Напиши своими словами — как есть, это никто не будет оценивать.' },
+      { id: 'A2', topic: 'Сначала о тебе', type: 'open', noConf: true,
+        q: 'Что такое <i>x</i> в алгебре? Объясни своими словами, как объяснил бы младшему.' },
+
+      { id: 'F1', topic: 'Порядок действий', type: 'text',
+        q: 'Вычисли:', fields: [{ lbl: '', expr: `18 ${M} 6 : 3 · 2` }] },
+      { id: 'F2', topic: 'Отрицательные числа', type: 'text',
+        q: 'Вычисли:', fields: [
+          { lbl: 'а)', expr: `7 ${M} 12` },
+          { lbl: 'б)', expr: `${M}8 + (${M}5)` },
+          { lbl: 'в)', expr: `${M}3 ${M} (${M}7)` },
+          { lbl: 'г)', expr: `(${M}4) · (${M}6)` },
+          { lbl: 'д)', expr: `${M}24 : 3` }] },
+      { id: 'F3', topic: 'Смысл знака «=»', type: 'text',
+        q: 'Какое число надо написать в окошко, чтобы получилось верное равенство?',
+        fields: [{ lbl: '', expr: '8 + 4 = ☐ + 5' }] },
+      { id: 'F4', topic: 'Обыкновенные дроби', type: 'text',
+        q: 'Вычисли. Ответ запиши дробью через косую черту, например 5/7.', fields: [
+          { lbl: 'а)', expr: `${fr(2, 3)} + ${fr(1, 4)}` },
+          { lbl: 'б)', expr: `${fr(3, 4)} · ${fr(2, 9)}` },
+          { lbl: 'в)', expr: `${fr(5, 6)} : ${fr(10, 3)}` },
+          { lbl: 'г)', expr: `2${fr(1, 2)} ${M} ${fr(3, 4)}` }], work: 'required' },
+      { id: 'F5', topic: 'Десятичные дроби', type: 'text',
+        q: 'Вычисли:', fields: [
+          { lbl: 'а)', expr: '0,3 · 0,2' },
+          { lbl: 'б)', expr: '2,4 : 0,06' },
+          { lbl: 'в)', expr: `5 ${M} 1,25` }] },
+      { id: 'F6', topic: 'Сравнение чисел', type: 'text',
+        q: 'Поставь знак &gt;, &lt; или = между числами.', fields: [
+          { lbl: 'а)', expr: '0,25 ☐ 0,3' },
+          { lbl: 'б)', expr: `${M}5 ☐ ${M}2` },
+          { lbl: 'в)', expr: `${fr(1, 3)} ☐ 0,3` },
+          { lbl: 'г)', expr: `${fr(3, 7)} ☐ ${fr(3, 8)}` }] },
+      { id: 'F7', topic: 'Проценты и пропорции', type: 'text',
+        q: 'Реши:', fields: [
+          { lbl: 'а)', expr: 'Сколько будет 20% от 45?' },
+          { lbl: 'б)', expr: '4 тетради стоят 60 руб. Сколько стоят 7 таких тетрадей?' }] },
+      { id: 'F8', topic: 'Числовая прямая', type: 'text',
+        q: `Какое число отмечено точкой A? ${numberLine()}`, fields: [{ lbl: 'A =', expr: '' }] },
+      { id: 'F9', topic: 'Координатная плоскость', type: 'text',
+        q: `Запиши координаты точек A и B. ${plane({ id: 'f9', points: [{ x: -3, y: 2, label: 'A' }, { x: 4, y: -1, label: 'B' }] })}`,
+        fields: [{ lbl: 'A', expr: '', ph: '(…; …)' }, { lbl: 'B', expr: '', ph: '(…; …)' }] },
+      { id: 'F10', topic: 'Координатная плоскость', type: 'grid', maxPoints: 1,
+        q: 'Отметь на плоскости точку C(2; −4). Нажми на нужное место; нажмёшь ещё раз — точка уберётся.' },
+      { id: 'F11', topic: 'Степень числа', type: 'text',
+        q: 'Вычисли:', fields: [
+          { lbl: 'а)', expr: '5<sup>2</sup>' },
+          { lbl: 'б)', expr: '2<sup>3</sup>' },
+          { lbl: 'в)', expr: `(${M}3)<sup>2</sup>` },
+          { lbl: 'г)', expr: `${M}3<sup>2</sup>` }] },
+      { id: 'F12', topic: 'Простое уравнение', type: 'text',
+        q: 'Найди x:', fields: [
+          { lbl: 'а)', expr: 'x + 15 = 42' },
+          { lbl: 'б)', expr: `3x = ${M}12` },
+          { lbl: 'в)', expr: '45 : x = 9' }] },
+    ]
+  },
+  {
+    id: 'p2', title: 'Часть 2. Выражения и преобразования', minutes: '30–35 минут',
+    about: 'Числовые выражения, выражения с переменными, сравнение, свойства действий, тождества, раскрытие скобок.',
+    items: [
+      { id: 'E1', topic: 'Числовые выражения', type: 'text',
+        q: 'Найди значение выражения:', fields: [
+          { lbl: 'а)', expr: `(${M}2,5 + 4) · (${M}2)` },
+          { lbl: 'б)', expr: `${fr(3, 5)} · 10 ${M} 8 : (${M}2)` }], work: 'required' },
+      { id: 'E2', topic: 'Выражения с переменными', type: 'text',
+        q: 'Найди значение выражения:', fields: [
+          { lbl: 'а)', expr: `3a ${M} 2b &nbsp; при a = ${M}2, b = 5` },
+          { lbl: 'б)', expr: `x<sup>2</sup> ${M} 2x &nbsp; при x = ${M}3` }], work: 'required' },
+      { id: 'E3', topic: 'Выражения с переменными', type: 'text',
+        q: `При каком значении x выражение ${fr(12, `x ${M} 4`)} <b>не имеет смысла</b>?`, fields: [{ lbl: 'x =', expr: '' }] },
+      { id: 'E4', topic: 'Запись выражений', type: 'text',
+        q: 'Запиши выражением:', fields: [
+          { lbl: 'а)', expr: 'число, на 5 больше удвоенного числа x' },
+          { lbl: 'б)', expr: 'периметр прямоугольника со сторонами a и b' },
+          { lbl: 'в)', expr: 'стоимость n тетрадей по 35 руб. и ручки за 40 руб.' }] },
+      { id: 'E4b', topic: 'Выражения с переменными', type: 'text',
+        q: 'Известно, что a + b = 43. Чему равно a + b + 2?', fields: [{ lbl: '', expr: '' }],
+        work: 'required', workPrompt: 'Как ты это узнал?' },
+      { id: 'E5', topic: 'Сравнение значений выражений', type: 'choice',
+        q: 'Что верно про выражения 2a и a?',
+        options: ['2a всегда больше a', '2a всегда меньше a', '2a и a всегда равны', 'Зависит от того, чему равно a'],
+        work: 'required', workPrompt: 'Почему? Приведи пример.' },
+      { id: 'E6', topic: 'Сравнение значений выражений', type: 'text',
+        q: 'Сравни значения выражений (поставь &gt;, &lt; или =):', fields: [
+          { lbl: 'а)', expr: `${M}0,5 ☐ ${M}${fr(1, 3)}` },
+          { lbl: 'б)', expr: `${fr(3, 7)} ☐ 0,4` }] },
+      { id: 'E7', topic: 'Свойства действий', type: 'text',
+        q: 'Вычисли удобным способом (подумай, прежде чем считать «в лоб»):', fields: [
+          { lbl: 'а)', expr: '25 · 17 · 4' },
+          { lbl: 'б)', expr: '37 · 64 + 37 · 36' }], work: 'required', workPrompt: 'Каким способом считал?' },
+      { id: 'E8', topic: 'Подобные слагаемые', type: 'choice',
+        q: 'Чему равно 2x + 3x?', options: ['5x', '6x', `5x<sup>2</sup>`, '5', 'Упростить нельзя'] },
+      { id: 'E9', topic: 'Подобные слагаемые', type: 'text',
+        q: 'Упрости. Если упростить нельзя — так и напиши.', fields: [
+          { lbl: 'а)', expr: `5x ${M} 3 + 2x + 8` },
+          { lbl: 'б)', expr: `4a ${M} a` },
+          { lbl: 'в)', expr: '3x + 2y' },
+          { lbl: 'г)', expr: 'x + x + x' },
+          { lbl: 'д)', expr: 'x · x · x' }] },
+      { id: 'E10', topic: 'Раскрытие скобок', type: 'text',
+        q: 'Раскрой скобки:', fields: [
+          { lbl: 'а)', expr: `3(2x ${M} 5)` },
+          { lbl: 'б)', expr: `${M}(a ${M} b + 4)` },
+          { lbl: 'в)', expr: `${M}2(3 ${M} y)` }] },
+      { id: 'E11', topic: 'Тождественные преобразования', type: 'text',
+        q: 'Упрости выражение:', fields: [{ lbl: '', expr: `7 ${M} (2x ${M} 3) + 4x` }], work: 'required' },
+      { id: 'E12', topic: 'Тождества', type: 'choice', multi: true,
+        q: 'Какие равенства — тождества (верны при <b>любых</b> значениях букв)? Отметь все такие.',
+        options: ['3(x + 2) = 3x + 6', '2(a + b) = 2a + b', `a ${M} b = b ${M} a`, `${M}(${M}x) = x`, 'a + b = b + a', 'x · 0 = x'] },
+      { id: 'E13', topic: 'Тождественные преобразования', type: 'text',
+        q: `Найди значение выражения 4(a ${M} 2) ${M} 3a + 8 при a = 1,7.`, fields: [{ lbl: '', expr: '' }],
+        work: 'required', workPrompt: 'Как ты считал: сразу подставил число или сначала что-то сделал с выражением?' },
+    ]
+  },
+  {
+    id: 'p3', title: 'Часть 3. Уравнения и задачи', minutes: '35–40 минут',
+    about: 'Корни уравнения, линейные уравнения, задачи с помощью уравнений, формулы.',
+    items: [
+      { id: 'U1', topic: 'Уравнение и его корни', type: 'choice', multi: true,
+        q: `Какие из чисел являются корнями уравнения 2x ${M} 1 = x + 2? Отметь все такие.`,
+        options: ['3', `${M}2`, '1', '0'], work: 'required', workPrompt: 'Как ты проверял?' },
+      { id: 'U2', topic: 'Линейное уравнение', type: 'text',
+        q: 'Реши уравнения:', fields: [
+          { lbl: 'а)', expr: '4x + 7 = 19' },
+          { lbl: 'б)', expr: `7 ${M} 3x = 1` },
+          { lbl: 'в)', expr: `${M}2x = 10` },
+          { lbl: 'г)', expr: '0,4x = 2' }] },
+      { id: 'U3', topic: 'Линейное уравнение', type: 'text',
+        q: 'Реши уравнение:', fields: [{ lbl: '', expr: `5x ${M} 8 = 2x + 7` }], work: 'required',
+        workPrompt: 'Запиши решение по шагам (или реши в тетради и сфотографируй).' },
+      { id: 'U4', topic: 'Линейное уравнение', type: 'text',
+        q: 'Реши уравнение:', fields: [{ lbl: '', expr: `3(x ${M} 2) = x + 4` }], work: 'required',
+        workPrompt: 'Запиши решение по шагам.' },
+      { id: 'U5', topic: 'Линейное уравнение', type: 'text',
+        q: 'Реши уравнение:', fields: [{ lbl: '', expr: `${fr('x', 2)} + ${fr('x', 3)} = 10` }], work: 'required' },
+      { id: 'U6', topic: 'Число корней', type: 'text',
+        q: 'Сколько корней у уравнения? Напиши: «один» (и какой), «нет корней» или «бесконечно много».', fields: [
+          { lbl: 'а)', expr: '2(x + 1) = 2x + 2' },
+          { lbl: 'б)', expr: '2x + 1 = 2x + 5' },
+          { lbl: 'в)', expr: '0 · x = 0' }] },
+      { id: 'U7', topic: 'Составление уравнения', type: 'choice',
+        q: 'Купили 3 ручки и 2 тетради и заплатили 110 руб. Тетрадь на 5 руб. дороже ручки. Пусть x руб. — цена ручки. Какое уравнение соответствует задаче? <span class="hint">(Решать не нужно.)</span>',
+        options: ['3x + 2(x + 5) = 110', '3x + 2x + 5 = 110', '3(x + 5) + 2x = 110', '5x = 110 + 5'] },
+      { id: 'U8', topic: 'Задачи с помощью уравнений', type: 'text',
+        q: 'В двух корзинах 46 яблок. В первой на 8 яблок больше, чем во второй. Сколько яблок во второй корзине?',
+        fields: [{ lbl: 'Ответ:', expr: '' }], work: 'required', workPrompt: 'Что ты обозначил за x и какое уравнение составил?' },
+      { id: 'U9', topic: 'Задачи с помощью уравнений', type: 'text',
+        q: 'Из двух городов, расстояние между которыми 120 км, одновременно навстречу друг другу выехали два велосипедиста. Скорость одного 12 км/ч, другого 18 км/ч. Через сколько часов они встретятся?',
+        fields: [{ lbl: 'Ответ:', expr: '' }], work: 'required' },
+      { id: 'U10', topic: 'Задачи с помощью уравнений', type: 'text',
+        q: 'Мама старше сына в 4 раза, а через 20 лет будет старше его в 2 раза. Сколько лет сыну сейчас?',
+        fields: [{ lbl: 'Ответ:', expr: '' }], work: 'required', workPrompt: 'Что обозначил за x и какое уравнение составил?' },
+      { id: 'U11', topic: 'Формулы', type: 'text',
+        q: 'Путь s, скорость v и время t связаны формулой s = vt.', fields: [
+          { lbl: 'а)', expr: 'Найди t, если s = 150 км, v = 60 км/ч' },
+          { lbl: 'б)', expr: 'Вырази v из формулы: v = …' }] },
+      { id: 'U12', topic: 'Формулы', type: 'text',
+        q: 'Периметр прямоугольника P = 2(a + b). Найди b, если P = 30 см, a = 8 см.', fields: [{ lbl: 'b =', expr: '' }] },
+    ]
+  },
+  {
+    id: 'p4', title: 'Часть 4. Функции и графики', minutes: '30–35 минут',
+    about: 'Числовые промежутки, функция, значения по формуле, графики, линейная функция.',
+    items: [
+      { id: 'G1', topic: 'Числовые промежутки', type: 'text',
+        q: `Запиши в виде промежутка множество чисел x, для которых ${M}2 ≤ x &lt; 5. Например: (1; 3] или [${M}4; +∞).`,
+        fields: [{ lbl: '', expr: '' }] },
+      { id: 'G2', topic: 'Числовые промежутки', type: 'text',
+        q: `Промежуток [${M}2; 5).`, fields: [
+          { lbl: 'а)', expr: 'Принадлежит ли ему число 5? (да / нет)' },
+          { lbl: 'б)', expr: `Принадлежит ли ему число ${M}2? (да / нет)` },
+          { lbl: 'в)', expr: 'Сколько в нём целых чисел?' }] },
+      { id: 'G3', topic: 'Что такое функция', type: 'choice',
+        q: `В какой таблице y <b>не является</b> функцией от x?
+            <table class="tbl"><tr><th></th><th colspan="4">1</th></tr>
+            <tr><td>x</td><td>1</td><td>2</td><td>3</td><td>4</td></tr><tr><td>y</td><td>5</td><td>5</td><td>5</td><td>5</td></tr></table>
+            <table class="tbl"><tr><th></th><th colspan="4">2</th></tr>
+            <tr><td>x</td><td>1</td><td>2</td><td>2</td><td>3</td></tr><tr><td>y</td><td>4</td><td>6</td><td>7</td><td>8</td></tr></table>
+            <table class="tbl"><tr><th></th><th colspan="4">3</th></tr>
+            <tr><td>x</td><td>${M}1</td><td>0</td><td>1</td><td>2</td></tr><tr><td>y</td><td>1</td><td>0</td><td>1</td><td>4</td></tr></table>`,
+        options: ['Таблица 1', 'Таблица 2', 'Таблица 3', 'Во всех трёх y — функция от x'],
+        work: 'required', workPrompt: 'Почему?' },
+      { id: 'G4', topic: 'Значение функции по формуле', type: 'text',
+        q: `Функция задана формулой y = 2x ${M} 3.`, fields: [
+          { lbl: 'а)', expr: `Найди y при x = ${M}4` },
+          { lbl: 'б)', expr: 'Найди x, при котором y = 7' }] },
+      { id: 'G5', topic: 'Значение функции по формуле', type: 'text',
+        q: `Функция задана формулой y = x<sup>2</sup> ${M} 1. Заполни таблицу.`, fields: [
+          { lbl: '', expr: `x = ${M}2, &nbsp; y =` },
+          { lbl: '', expr: 'x = 0, &nbsp; y =' },
+          { lbl: '', expr: 'x = 3, &nbsp; y =' }] },
+      { id: 'G6', topic: 'График функции', type: 'text',
+        q: `На рисунке — график функции. ${plane({ id: 'g6', poly: [[-4, -2], [-1, 4], [2, 1], [4, 3], [5, 1]] })}`, fields: [
+          { lbl: 'а)', expr: 'Чему равно y при x = 2?' },
+          { lbl: 'б)', expr: 'Чему равно y при x = 0?' },
+          { lbl: 'в)', expr: 'При каком x значение y = 0?' },
+          { lbl: 'г)', expr: 'Наибольшее значение y' },
+          { lbl: 'д)', expr: 'Какие значения принимает x (область определения)?' }] },
+      { id: 'G7', topic: 'График функции', type: 'text',
+        q: `Принадлежит ли точка графику функции y = 3x ${M} 5? (да / нет)`, fields: [
+          { lbl: 'а)', expr: 'A(2; 1)' },
+          { lbl: 'б)', expr: `B(${M}1; 2)` }], work: 'required', workPrompt: 'Как проверял?' },
+      { id: 'G8', topic: 'Линейная функция', type: 'choice', multi: true,
+        q: 'Какие из функций — линейные? Отметь все такие.',
+        options: [`y = 3x ${M} 1`, 'y = x<sup>2</sup>', 'y = 5', `y = ${M}${fr('x', 2)}`, `y = ${fr(2, 'x')}`] },
+      { id: 'G9', topic: 'График линейной функции', type: 'grid', maxPoints: 2, drawLine: true,
+        q: `Построй график функции y = ${M}2x + 1. Отметь две точки графика — прямая проведётся через них сама.`,
+        work: 'required', workPrompt: 'Какие точки ты взял и как их нашёл?' },
+      { id: 'G10', topic: 'Линейная функция: k и b', type: 'text',
+        q: `На рисунке три прямые. Какая прямая — график каждой функции? Напиши номер.
+            ${plane({ id: 'g10', lines: [
+              { k: 2, b: 0, color: '#c0392b', label: '1', lx: 3.3, ly: 5.3 },
+              { k: -1, b: 3, color: '#2e8b57', label: '2', lx: -3.6, ly: 5.5 },
+              { k: 0, b: -2, color: '#3f6ad8', label: '3', lx: -5.5, ly: -1.6 }] })}`,
+        fields: [
+          { lbl: '', expr: 'y = 2x', ph: 'номер' },
+          { lbl: '', expr: `y = ${M}2`, ph: 'номер' },
+          { lbl: '', expr: `y = ${M}x + 3`, ph: 'номер' }] },
+      { id: 'G11', topic: 'Прямая пропорциональность', type: 'text',
+        q: `График функции y = kx проходит через точку (2; ${M}6). Найди k.`, fields: [{ lbl: 'k =', expr: '' }] },
+      { id: 'G12', topic: 'Линейная функция', type: 'text',
+        q: `Найди координаты точек пересечения графика y = 2x ${M} 4 с осями координат.`, fields: [
+          { lbl: 'с осью x:', expr: '', ph: '(…; …)' },
+          { lbl: 'с осью y:', expr: '', ph: '(…; …)' }] },
+      { id: 'G13', topic: 'Взаимное расположение прямых', type: 'choice',
+        q: `Как расположены графики функций y = 2x + 1 и y = 2x ${M} 3?`,
+        options: ['Пересекаются', 'Параллельны', 'Совпадают', 'Не знаю, как это определить'] },
+      { id: 'G14', topic: 'Функция в жизни', type: 'text',
+        q: 'Такси: 100 руб. за посадку и 30 руб. за каждый километр.', fields: [
+          { lbl: 'а)', expr: 'Запиши формулу стоимости y (руб.) поездки на x км: y =' },
+          { lbl: 'б)', expr: 'Сколько стоит поездка на 12 км?' },
+          { lbl: 'в)', expr: 'Сколько км можно проехать на 700 руб.?' }] },
+    ]
+  }
+];
+
+const VERSION = 'diag-v1';
+const KEY = 'algebra7-' + VERSION;
+const CONF = [['sure', 'Уверен'], ['doubt', 'Сомневаюсь'], ['guess', 'Угадал'], ['dunno', 'Не знаю / не проходили']];
+
+let store = JSON.parse(localStorage.getItem(KEY) || '{}');
+store.answers = store.answers || {};
+store.parts = store.parts || {};
+const save = () => localStorage.setItem(KEY, JSON.stringify(store));
+
+let current = null; // {part, index, shownAt}
+const app = document.getElementById('app');
+
+function answerOf(id) { return store.answers[id] || (store.answers[id] = { value: null, conf: null, work: '', timeMs: 0, visits: 0 }); }
+function isAnswered(item) {
+  const a = store.answers[item.id];
+  if (!a) return false;
+  if (a.conf === 'dunno') return true;
+  const v = a.value;
+  if (v == null) return false;
+  if (Array.isArray(v)) return v.some(x => x !== '' && x != null);
+  return v !== '';
+}
+function partProgress(p) { return p.items.filter(isAnswered).length; }
+
+// ---------- screens ----------
+function home() {
+  leaveItem();
+  current = null;
+  app.innerHTML = `
+    <h1>Алгебра, 7 класс</h1>
+    <p class="muted">Диагностическая работа</p>
+    <div class="card">
+      <h2>Как это устроено</h2>
+      <ul class="rules">
+        <li><b>Это не контрольная.</b> Оценки не будет. Задача — понять, что тебе объяснить, а что ты уже знаешь.</li>
+        <li><b>«Не знаю» — хороший ответ.</b> Не угадывай: угаданный ответ прячет то, что нужно объяснить. Если не знаешь — нажми «Не знаю / не проходили» и иди дальше.</li>
+        <li><b>Решай в тетради</b>, а сюда пиши ответ. Где просят «как решал» — напиши коротко, хоть одной строкой. Тетрадь потом сфотографируй.</li>
+        <li><b>Калькулятор не нужен</b> и не используй его.</li>
+        <li>Части можно делать в разные дни. Всё сохраняется само; можно закрыть страницу и вернуться.</li>
+      </ul>
+    </div>
+    <div class="parts">
+      ${PARTS.map(p => {
+        const n = partProgress(p), done = store.parts[p.id]?.finished;
+        return `<button class="part-btn" data-part="${p.id}">
+          <b>${p.title}</b><small>${p.about}</small><br>
+          <span class="badge${done ? ' done' : ''}">${done ? 'готово' : `${n} из ${p.items.length}`} · ${p.minutes}</span>
+        </button>`;
+      }).join('')}
+    </div>
+    <div class="card">
+      <h2>Когда закончишь</h2>
+      <p>Нажми «Скопировать ответы» и вставь текст в сообщение. Отдельно пришли фото тетради.</p>
+      <div class="nav"><button class="main" id="copy-all">Скопировать ответы</button>
+      <button class="ghost" id="export">Скачать файлом</button>
+      <button class="ghost" id="reset">Начать заново (стереть ответы)</button></div>
+    </div>`;
+  app.querySelectorAll('[data-part]').forEach(b => b.onclick = () => openPart(b.dataset.part));
+  document.getElementById('export').onclick = exportResults;
+  document.getElementById('copy-all').onclick = e => copyAnswers(PARTS, e.currentTarget);
+  document.getElementById('reset').onclick = resetAll;
+}
+
+function openPart(pid) {
+  const part = PARTS.find(p => p.id === pid);
+  store.parts[pid] = store.parts[pid] || { startedAt: new Date().toISOString() };
+  save();
+  const first = part.items.findIndex(i => !isAnswered(i));
+  showItem(part, first === -1 ? 0 : first);
+}
+
+function leaveItem() {
+  if (!current) return;
+  const a = answerOf(current.item.id);
+  a.timeMs += Date.now() - current.shownAt;
+  save();
+}
+
+function showItem(part, index) {
+  leaveItem();
+  const item = part.items[index];
+  const a = answerOf(item.id);
+  a.visits += 1;
+  current = { part, index, item, shownAt: Date.now() };
+  save();
+
+  const workLabel = item.work === 'required'
+    ? `<div class="work-lbl required">✎ ${item.workPrompt || 'Как решал? Напиши коротко.'}</div>`
+    : `<div class="work-lbl muted">Как решал (если хочешь):</div>`;
+
+  app.innerHTML = `
+    <div class="nav" style="margin-top:0"><button class="ghost" id="back-home">← Все части</button>
+      <span class="muted">${part.title}</span></div>
+    <div class="progress"><div style="width:${100 * partProgress(part) / part.items.length}%"></div></div>
+    <div class="card">
+      <div class="topic">Задание ${index + 1} из ${part.items.length} · ${item.topic}</div>
+      <div class="q">${item.q}</div>
+      <div id="answer"></div>
+      ${item.type === 'open' || item.type === 'scale' ? '' : workLabel + `<textarea id="work">${escapeHtml(a.work)}</textarea>`}
+      ${item.noConf ? '' : `<div class="work-lbl muted">Насколько ты уверен в ответе?</div>
+        <div class="conf">${CONF.map(([v, t]) =>
+          `<label><input type="radio" name="conf" value="${v}" ${a.conf === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div>`}
+      <div class="nav">
+        <button class="ghost" id="prev" ${index === 0 ? 'disabled style="visibility:hidden"' : ''}>← Назад</button>
+        <button class="main" id="next">${index === part.items.length - 1 ? 'Закончить часть' : 'Дальше →'}</button>
+      </div>
+      <div class="dots">${part.items.map((it, i) =>
+        `<button class="dot${isAnswered(it) ? ' answered' : ''}${i === index ? ' current' : ''}" data-i="${i}" title="${it.topic}">${i + 1}</button>`).join('')}</div>
+    </div>`;
+
+  renderAnswer(item, a);
+
+  const work = document.getElementById('work');
+  if (work) work.oninput = () => { a.work = work.value; save(); };
+  app.querySelectorAll('input[name=conf]').forEach(r => r.onchange = () => { a.conf = r.value; save(); refreshDots(part); });
+  document.getElementById('back-home').onclick = home;
+  document.getElementById('prev').onclick = () => showItem(part, index - 1);
+  document.getElementById('next').onclick = () => {
+    if (index === part.items.length - 1) finishPart(part); else showItem(part, index + 1);
+  };
+  app.querySelectorAll('.dot').forEach(d => d.onclick = () => showItem(part, +d.dataset.i));
+  const firstInput = app.querySelector('#answer input[type=text], #answer textarea');
+  if (firstInput) firstInput.focus();
+  window.scrollTo(0, 0);
+}
+
+function refreshDots(part) {
+  app.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('answered', isAnswered(part.items[i])));
+  const bar = app.querySelector('.progress > div');
+  if (bar) bar.style.width = `${100 * partProgress(part) / part.items.length}%`;
+}
+
+function renderAnswer(item, a) {
+  const box = document.getElementById('answer');
+  const part = current.part;
+  const changed = () => { save(); refreshDots(part); };
+
+  if (item.type === 'text') {
+    if (!Array.isArray(a.value)) a.value = item.fields.map(() => '');
+    box.innerHTML = item.fields.map((f, i) => `
+      <div class="sub"><span class="lbl">${f.lbl}</span>${f.expr ? `<span class="expr">${f.expr}</span>` : ''}
+      <input type="text" data-i="${i}" placeholder="${f.ph || 'ответ'}" value="${escapeHtml(a.value[i] || '')}" autocomplete="off"></div>`).join('');
+    box.querySelectorAll('input').forEach(inp => inp.oninput = () => { a.value[+inp.dataset.i] = inp.value; changed(); });
+    box.querySelectorAll('input').forEach((inp, i, all) => inp.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); (all[i + 1] || document.getElementById('work') || inp).focus(); }
+    });
+  } else if (item.type === 'choice' || item.type === 'scale') {
+    const multi = !!item.multi;
+    if (multi && !Array.isArray(a.value)) a.value = [];
+    box.innerHTML = item.options.map((o, i) => `
+      <label class="opt"><input type="${multi ? 'checkbox' : 'radio'}" name="opt" value="${i}"
+        ${multi ? (a.value.includes(i) ? 'checked' : '') : (a.value === i ? 'checked' : '')}><span>${o}</span></label>`).join('');
+    box.querySelectorAll('input').forEach(inp => inp.onchange = () => {
+      if (multi) a.value = [...box.querySelectorAll('input:checked')].map(x => +x.value);
+      else a.value = +inp.value;
+      changed();
+    });
+  } else if (item.type === 'open') {
+    box.innerHTML = `<textarea id="open">${escapeHtml(a.value || '')}</textarea>`;
+    const t = box.querySelector('textarea');
+    t.oninput = () => { a.value = t.value; changed(); };
+  } else if (item.type === 'grid') {
+    if (!Array.isArray(a.value)) a.value = [];
+    box.innerHTML = plane({ id: 'grid-' + item.id, clickable: true }) +
+      `<div class="hint" id="pts"></div>`;
+    const svg = box.querySelector('svg');
+    const draw = () => drawMarks(svg, a.value, item.drawLine);
+    svg.onclick = e => {
+      const r = svg.getBoundingClientRect();
+      const min = +svg.dataset.min, max = +svg.dataset.max, u = +svg.dataset.unit;
+      const scale = svg.viewBox.baseVal.width / r.width;
+      const x = Math.round((e.clientX - r.left) * scale / u - 1 + min);
+      const y = Math.round(max + 1 - (e.clientY - r.top) * scale / u);
+      if (x < min || x > max || y < min || y > max) return;
+      const k = a.value.findIndex(p => p[0] === x && p[1] === y);
+      if (k >= 0) a.value.splice(k, 1);
+      else { a.value.push([x, y]); if (a.value.length > item.maxPoints) a.value.shift(); }
+      draw(); changed();
+    };
+    draw();
+  }
+}
+
+function drawMarks(svg, pts, drawLine) {
+  const min = +svg.dataset.min, max = +svg.dataset.max, u = +svg.dataset.unit;
+  const X = x => (x - min + 1) * u, Y = y => (max - y + 1) * u;
+  let s = '';
+  if (drawLine && pts.length === 2) {
+    const [[x1, y1], [x2, y2]] = pts;
+    if (x1 === x2) s += `<line x1="${X(x1)}" y1="${Y(min)}" x2="${X(x1)}" y2="${Y(max)}" stroke="#3f6ad8" stroke-width="2.5"/>`;
+    else {
+      const k = (y2 - y1) / (x2 - x1), b = y1 - k * x1;
+      s += `<line x1="${X(min)}" y1="${Y(k * min + b)}" x2="${X(max)}" y2="${Y(k * max + b)}" stroke="#3f6ad8" stroke-width="2.5" clip-path="url(#clipgrid-${svg.id.slice(5)})"/>`;
+    }
+  }
+  for (const [x, y] of pts) s += `<circle cx="${X(x)}" cy="${Y(y)}" r="6" fill="#c0392b"/>`;
+  svg.querySelector('.marks').innerHTML = s;
+  const info = document.getElementById('pts');
+  if (info) info.textContent = pts.length ? 'Отмечено: ' + pts.map(([x, y]) => `(${x}; ${y})`).join(', ') : 'Пока ничего не отмечено.';
+}
+
+function finishPart(part) {
+  leaveItem();
+  const missing = part.items.map((it, i) => isAnswered(it) ? null : i + 1).filter(x => x);
+  store.parts[part.id].finished = true;
+  store.parts[part.id].finishedAt = new Date().toISOString();
+  save();
+  current = null;
+  app.innerHTML = `<div class="card done-box">
+    <h2>${part.title} — готово! 🎉</h2>
+    ${missing.length ? `<p>Без ответа остались задания: ${missing.join(', ')}. Можно вернуться, а можно оставить так —
+      если не знаешь, лучше отметить «Не знаю / не проходили».</p>` : '<p>Ответы на все задания есть. Отдохни перед следующей частью.</p>'}
+    <div class="nav" style="justify-content:center">
+      ${missing.length ? `<button class="ghost" id="ret">Вернуться к пропущенным</button>` : ''}
+      <button class="main" id="copy-part">Скопировать ответы этой части</button>
+      <button class="ghost" id="home">К списку частей</button></div>
+    <p class="hint">Скопированный текст вставь в сообщение и отправь.</p></div>`;
+  document.getElementById('home').onclick = home;
+  document.getElementById('copy-part').onclick = e => copyAnswers([part], e.currentTarget);
+  const ret = document.getElementById('ret');
+  if (ret) ret.onclick = () => showItem(part, missing[0] - 1);
+}
+
+function plainText(html) { const d = document.createElement('div'); d.innerHTML = html; d.querySelectorAll('svg').forEach(s => s.remove()); return d.textContent.replace(/\s+/g, ' ').trim(); }
+
+function exportResults() {
+  const out = {
+    version: VERSION, exportedAt: new Date().toISOString(), parts: store.parts,
+    items: PARTS.flatMap(p => p.items.map(it => {
+      const a = store.answers[it.id] || {};
+      let value = a.value ?? null;
+      if (it.type === 'choice' || it.type === 'scale') {
+        const pick = i => plainText(it.options[i]);
+        value = Array.isArray(value) ? value.map(pick) : (value == null ? null : pick(value));
+      }
+      return {
+        id: it.id, part: p.id, topic: it.topic, question: plainText(it.q),
+        fields: it.fields ? it.fields.map(f => plainText(f.lbl + ' ' + f.expr)) : undefined,
+        answer: value, confidence: a.conf ?? null, work: a.work || '',
+        seconds: Math.round((a.timeMs || 0) / 1000), visits: a.visits || 0
+      };
+    }))
+  };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `algebra7-answers-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+// Compact text for pasting into a messenger: one line per item, no question text.
+const CONF_SHORT = { sure: 'уверен', doubt: 'сомневаюсь', guess: 'угадал', dunno: 'не знаю' };
+function answersText(parts) {
+  const lines = [`${VERSION} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`];
+  for (const p of parts) {
+    lines.push('', p.title);
+    for (const it of p.items) {
+      const a = store.answers[it.id] || {};
+      let v = a.value ?? '';
+      if (it.type === 'choice' || it.type === 'scale') {
+        const pick = i => plainText(it.options[i]);
+        v = Array.isArray(v) ? v.map(pick).join(' / ') : (v === '' ? '' : pick(v));
+      } else if (it.type === 'grid') {
+        v = (v || []).map(([x, y]) => `(${x};${y})`).join(' ');
+      } else if (Array.isArray(v)) {
+        v = v.map(s => s.trim() || '—').join(' | ');
+      }
+      let line = `${it.id}: ${String(v).replace(/\s+/g, ' ').trim() || '—'}`;
+      if (a.conf) line += ` [${CONF_SHORT[a.conf]}]`;
+      line += ` ${Math.round((a.timeMs || 0) / 1000)}с`;
+      if (a.work && a.work.trim()) line += ` | как: ${a.work.replace(/\s+/g, ' ').trim()}`;
+      lines.push(line);
+    }
+  }
+  return lines.join('\n');
+}
+
+function copyAnswers(parts, btn) {
+  const text = answersText(parts);
+  document.getElementById('copy-box')?.remove();
+  const fallback = () => {
+    app.insertAdjacentHTML('beforeend', `<div class="card" id="copy-box">
+      <p>Не получилось скопировать автоматически. Выдели весь текст ниже (Ctrl+A или долгое нажатие → «Выбрать всё»),
+      скопируй и отправь сообщением.</p><textarea style="min-height:240px">${escapeHtml(text)}</textarea></div>`);
+    const t = document.querySelector('#copy-box textarea');
+    t.focus(); t.select();
+    t.scrollIntoView();
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => { btn.textContent = 'Скопировано ✓ — вставь в сообщение'; })
+      .catch(fallback);
+  } else fallback();
+}
+
+function resetAll() {
+  const ok = window.confirm('Точно стереть все ответы? Вернуть их будет нельзя. Сначала лучше скачать файл с ответами.');
+  if (!ok) return;
+  localStorage.removeItem(KEY);
+  store = { answers: {}, parts: {} };
+  home();
+}
+
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
+
+window.addEventListener('beforeunload', leaveItem);
+home();
+</script>
+</body>
+</html>
