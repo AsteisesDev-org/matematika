@@ -654,7 +654,15 @@ function finishPart(part) {
   if (ret) ret.onclick = () => showItem(part, missing[0] - 1);
 }
 
-function plainText(html) { const d = document.createElement('div'); d.innerHTML = html; d.querySelectorAll('svg').forEach(s => s.remove()); return d.textContent.replace(/\s+/g, ' ').trim(); }
+function plainText(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  d.querySelectorAll('svg').forEach(s => s.remove());
+  // Keep the maths readable in the export: stacked fractions and powers would glue into "23" / "52".
+  d.querySelectorAll('.fr').forEach(f => f.replaceWith(` (${f.children[0].textContent})/(${f.children[1].textContent})`.replace(/\((\w+)\)/g, '$1')));
+  d.querySelectorAll('sup').forEach(s => s.replaceWith('^' + s.textContent));
+  return d.textContent.replace(/\s+/g, ' ').trim();
+}
 
 function exportResults() {
   const out = {
