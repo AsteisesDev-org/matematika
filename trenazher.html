@@ -301,6 +301,445 @@ function genMixed() {
   };
 }
 
+// ---------- expressions ----------
+// An expression is a map variable -> coefficient, '' for the constant: −a − 4b + 4 is {a: -1, b: -4, '': 4}.
+// Letters that look alike on the Russian layout are read as Latin: "а" typed by mistake is still a.
+const LOOKALIKE = { 'а': 'a', 'с': 'c', 'х': 'x', 'у': 'y', 'е': 'e', 'о': 'o', 'р': 'p', 'к': 'k' };
+
+// Accepts "-a - 4b + 4", "4 − a − 4·b", any term order. Returns {value: map, form: 'expr'} or null.
+function parseLinear(str) {
+  const s = String(str || '').toLowerCase().replace(/[асхуеорк]/g, ch => LOOKALIKE[ch])
+    .replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/[\s·*]/g, '');
+  if (!s) return null;
+  const terms = {}, re = /([+-]?)(\d+(?:\.\d+)?)?([a-z]?)/y;
+  let pos = 0;
+  while (pos < s.length) {
+    re.lastIndex = pos;
+    const m = re.exec(s);
+    if (!m || (!m[2] && !m[3]) || (pos > 0 && !m[1])) return null;
+    terms[m[3]] = round6((terms[m[3]] || 0) + (m[1] === '-' ? -1 : 1) * (m[2] ? +m[2] : 1));
+    pos = re.lastIndex;
+  }
+  for (const k in terms) if (terms[k] === 0) delete terms[k];
+  return { value: terms, form: 'expr' };
+}
+const sameLinear = (p, q) => [...new Set([...Object.keys(p), ...Object.keys(q)])].every(k => eq(p[k] || 0, q[k] || 0));
+const evalLinear = (t, vals) => round6(Object.entries(t).reduce((s, [k, c]) => s + c * (k ? vals[k] : 1), 0));
+const termStr = (c, k) => (c < 0 ? '−' : '') + (k && Math.abs(c) === 1 ? '' : fmt(Math.abs(c))) + k;
+const fmtLinear = (t, order = Object.keys(t)) => order.filter(k => t[k]).map((k, i) =>
+  i === 0 ? termStr(t[k], k) : (t[k] < 0 ? ' − ' : ' + ') + termStr(Math.abs(t[k]), k)).join('') || '0';
+const negLinear = t => Object.fromEntries(Object.entries(t).map(([k, c]) => [k, -c]));
+const addLinear = (p, q) => { const r = { ...p }; for (const k in q) r[k] = (r[k] || 0) + q[k]; return r; };
+
+function genBracket() {
+  const [v1, v2] = pick([['a', 'b'], ['x', 'y'], ['a', 'c'], ['x', 'c']]);
+  let order = pick([[v1, v2, ''], [v1, v2, ''], [v1, ''], [v1, v2]]);
+  if (order.length === 2 && Math.random() < 0.3) order = [order[1], order[0]];
+  const inside = {};
+  do {
+    for (const [i, k] of order.entries())
+      inside[k] = (i === 0 && Math.random() < 0.7 ? 1 : pick([1, -1])) * (k ? pick([1, 1, 2, 3, 4, 5, 7]) : ri(1, 9));
+  } while (!Object.values(inside).some(c => c < 0));
+  // Sometimes the bracket stands after another term: x − (y − 3). The minus there is the same −1.
+  const free = [v1, v2, ''].find(k => !order.includes(k));
+  const prefix = free !== undefined && Math.random() < 0.4 ? { [free]: (free ? pick([1, 2, 3]) : ri(2, 12)) } : {};
+  const pre = Object.keys(prefix), all = [...pre, ...order];
+  const answer = addLinear(prefix, negLinear(inside));
+  const inStr = fmtLinear(inside, order), preStr = pre.length ? fmtLinear(prefix) : '';
+  const q = preStr ? `${preStr} − (${inStr})` : `−(${inStr})`;
+
+  // Typical slips: the bracket dropped with its signs kept, and only the first sign flipped.
+  const noFlip = addLinear(prefix, inside);
+  const firstOnly = addLinear(prefix, { ...inside, [order[0]]: -inside[order[0]] });
+  let vals;
+  for (let n = 0; n < 100; n++) {
+    vals = { [v1]: ri(1, 5), [v2]: ri(1, 5) };
+    if (evalLinear(answer, vals) !== evalLinear(noFlip, vals) && evalLinear(answer, vals) !== evalLinear(firstOnly, vals)) break;
+  }
+  const target = evalLinear(answer, vals);
+  const sub = (t, ord) => ord.filter(k => t[k]).map((k, i) => {
+    const c = t[k], body = k ? (Math.abs(c) === 1 ? '' : fmt(Math.abs(c)) + ' · ') + vals[k] : fmt(Math.abs(c));
+    return i === 0 ? (c < 0 ? '−' : '') + body : (c < 0 ? ' − ' : ' + ') + body;
+  }).join('');
+  const subQ = (preStr ? `${sub(prefix, pre)} − ` : '−') + `(${sub(inside, order)})`;
+  const valsStr = [v1, v2].filter(k => all.includes(k)).map(k => `${k} = ${vals[k]}`).join(', ');
+  const products = order.map(k => {
+    const c = inside[k], t = termStr(c, k);
+    return `(−1) · ${c < 0 ? `(${t})` : t} = ${termStr(-c, k)}`;
+  }).join('<br>');
+
+  return {
+    q, answer, expr: true, parseAns: parseLinear, same: v => sameLinear(v, answer), wide: true,
+    formHint: 'без скобок, буквы латинские',
+    inputHint: 'Запиши ответ без скобок, например: −x + 3. Буквы — латинские (английская раскладка), знаки — минус и плюс.',
+    scaffold: { label: `Минус перед скобкой — это умножение. На какое число? ${preStr ? `${preStr} + ` : ''}<b>?</b> · (${inStr})`,
+                answer: -1, hint: 'Минус перед числом или буквой — это умножение на −1: −5 = (−1) · 5, −a = (−1) · a. Перед скобкой — так же.' },
+    check: { label: `Проверь подстановкой. При ${valsStr} исходное выражение равно ${subQ} = ${fmt(target)}.
+                     Подставь те же числа в свой ответ. Получилось:`, target, compute: v => evalLinear(v, vals) },
+    diagnose(v) {
+      if (sameLinear(v, noFlip)) return 'Скобку убрал, а знаки внутри оставил. Но −(…) — это (−1) · (…): на −1 умножается каждое слагаемое, и у каждого знак меняется.';
+      if (sameLinear(v, firstOnly)) return 'Знак поменялся только у первого слагаемого. А −1 умножается на <b>каждое</b> слагаемое в скобке.';
+      if (order.some(k => !(k in v))) return `В скобке ${order.length === 2 ? 'два слагаемых' : 'три слагаемых'} — в ответе должно остаться каждое, только с другим знаком.`;
+      return 'Умножь −1 на каждое слагаемое в скобке по очереди и запиши, что получилось.';
+    },
+    solution: `<p>Минус перед скобкой — это умножение на −1:<br>${q} = ${preStr ? `${preStr} + ` : ''}(−1) · (${inStr})</p>
+      <p>Умножаем −1 на каждое слагаемое:<br>${products}</p>
+      <p>Ответ: <b>${fmtLinear(answer, all)}</b></p>
+      <p class="muted">У каждого слагаемого в скобке знак сменился на противоположный: плюс стал минусом, минус — плюсом.</p>`
+  };
+}
+
+// ---------- functions and graphs ----------
+// Coordinate plane −6…6: lines y = kx + b and points {x, y, color}.
+function plane({ lines = [], points = [] }) {
+  const R = 6, S = 260, u = S / (2 * R), X = x => S / 2 + x * u, Y = y => S / 2 - y * u;
+  let s = `<svg viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" xmlns="http://www.w3.org/2000/svg" style="border:1px solid #d8dce6;border-radius:8px">`;
+  for (let i = -R; i <= R; i++)
+    s += `<line x1="${X(i)}" y1="0" x2="${X(i)}" y2="${S}" stroke="#eceef3"/><line x1="0" y1="${Y(i)}" x2="${S}" y2="${Y(i)}" stroke="#eceef3"/>`;
+  s += `<line x1="0" y1="${Y(0)}" x2="${S}" y2="${Y(0)}" stroke="#333"/><line x1="${X(0)}" y1="0" x2="${X(0)}" y2="${S}" stroke="#333"/>
+    <text x="${S - 10}" y="${Y(0) - 6}" font-size="13">x</text><text x="${X(0) + 6}" y="12" font-size="13">y</text>
+    <text x="${X(1) - 3}" y="${Y(0) + 14}" font-size="11">1</text><text x="${X(0) - 11}" y="${Y(1) + 4}" font-size="11">1</text>
+    <text x="${X(0) - 11}" y="${Y(0) + 14}" font-size="11">0</text>`;
+  for (const { k, b, color = '#3f6ad8' } of lines)
+    s += `<line x1="${X(-R - 1)}" y1="${Y(k * (-R - 1) + b)}" x2="${X(R + 1)}" y2="${Y(k * (R + 1) + b)}" stroke="${color}" stroke-width="2.5"/>`;
+  for (const { x, y, color = '#c0392b' } of points) {
+    if (Math.abs(x) > R || Math.abs(y) > R) continue;
+    s += `<circle cx="${X(x)}" cy="${Y(y)}" r="4.5" fill="${color}"/>
+      <text x="${X(x) + (x > 3 ? -52 : 6)}" y="${Y(y) + (y > 4 ? 16 : -7)}" font-size="12" fill="${color}" font-weight="700">(${fmt(x)}; ${fmt(y)})</text>`;
+  }
+  return s + '</svg>';
+}
+const inPlane = (...ps) => ps.every(([x, y]) => Math.abs(x) <= 6 && Math.abs(y) <= 6);
+const rhs = (k, b, constFirst) => fmtLinear({ x: k, '': b }, constFirst ? ['', 'x'] : ['x', '']);
+const kx = (k, x) => `${k === 1 ? '' : k === -1 ? '−' : fmt(k) + ' · '}${par(x)}`;
+const subst = (k, b, x) => kx(k, x) + (b ? (b < 0 ? ' − ' : ' + ') + fmt(Math.abs(b)) : '');
+const randK = () => pick([-3, -2, -1, 1, 2, 3, 4, -4]);
+const YESNO = ['да', 'нет'];
+
+function genFunc() {
+  const kind = pick(['val', 'val', 'val', 'arg', 'arg', 'member', 'member', 'ox', 'oy', 'kfind', 'coef', 'linear', 'parallel', 'word', 'word', 'word']);
+  let k = randK(), b = pick([ri(-7, 7), ri(-7, 7), 0]);
+  const cf = Math.random() < 0.25 && b !== 0;
+  const f = `y = ${rhs(k, b, cf)}`;
+  const graph = (...pts) => inPlane(...pts.map(p => [p.x, p.y])) ? plane({ lines: [{ k, b }], points: pts }) : '';
+
+  if (kind === 'val') {
+    const x0 = pick([ri(-5, -1), ri(1, 5), ri(-5, 5)]), y0 = k * x0 + b;
+    const asPoint = Math.random() < 0.4;
+    return {
+      q: asPoint ? `Точка A(${fmt(x0)}; ?) лежит на графике функции ${f}. Найди её координату y.` : `Функция задана формулой ${f}. Найди y при x = ${fmt(x0)}.`,
+      answer: y0,
+      diagnose(v) {
+        if (b && eq(v, k * x0)) return `Ты посчитал ${kx(k, x0)}, а «${b < 0 ? '−' : '+'} ${Math.abs(b)}» потерял. Формула — это весь рецепт целиком.`;
+        if (x0 && eq(v, -k * x0 + b)) return `Знак у x потерялся. Подставляй x в скобках вместе с минусом: y = ${subst(k, b, x0)}.`;
+        if (y0 && eq(v, -y0)) return 'Число верное, а знак — нет. Посчитай по шагам: сначала умножение, потом сложение.';
+        return `Подставь ${fmt(x0)} вместо x: y = ${subst(k, b, x0)}. Сначала умножение, потом сложение.`;
+      },
+      solution: `<p>${asPoint ? 'Точка лежит на графике — значит, её координаты подходят к формуле. ' : ''}Вместо x подставляем ${fmt(x0)}:</p>
+        <p>y = ${subst(k, b, x0)} = <b>${fmt(y0)}</b></p>${graph({ x: x0, y: y0 })}`
+    };
+  }
+
+  if (kind === 'arg') {
+    const x0 = ri(-5, 5), y0 = k * x0 + b;
+    return {
+      q: `Функция задана формулой ${f}. При каком x значение y равно ${fmt(y0)}?`, answer: x0,
+      check: { label: 'Проверь: подставь свой x в формулу. y =', target: y0, compute: v => round6(k * v + b) },
+      diagnose(v) {
+        if (eq(v, k * y0 + b)) return `Ты подставил ${fmt(y0)} вместо x. Но ${fmt(y0)} — это y. Напиши вместо y: ${fmt(y0)} = ${rhs(k, b, cf)} — и реши уравнение.`;
+        return `Напиши ${fmt(y0)} вместо y: ${fmt(y0)} = ${rhs(k, b, cf)}. Получилось уравнение — реши его и проверь подстановкой.`;
+      },
+      solution: `<p>Вместо y пишем ${fmt(y0)} — получается уравнение:</p>
+        <p>${fmt(y0)} = ${rhs(k, b, cf)}<br>
+        ${b ? `${termStr(k, 'x')} = ${fmt(y0)} ${b < 0 ? '+' : '−'} ${fmt(Math.abs(b))} = ${fmt(y0 - b)}<br>` : ''}
+        x = ${fmt(y0 - b)} : ${par(k)} = <b>${fmt(x0)}</b></p>
+        <p>Проверка: ${subst(k, b, x0)} = ${fmt(y0)} ✓</p>${graph({ x: x0, y: y0 })}`
+    };
+  }
+
+  if (kind === 'member') {
+    const x0 = pick([ri(-4, -1), ri(1, 4), 0]), y0 = k * x0 + b;
+    const on = Math.random() < 0.5;
+    const yP = on ? y0 : (y0 !== 0 && Math.random() < 0.4 ? -y0 : y0 + pick([-2, -1, 1, 2]));
+    const ans = on ? 'да' : 'нет';
+    return {
+      q: `Принадлежит ли точка B(${fmt(x0)}; ${fmt(yP)}) графику функции ${f}?`, answer: ans,
+      options: YESNO, same: v => v === ans,
+      scaffold: { label: `Подставь x = ${fmt(x0)} в формулу. y =`, answer: y0, hint: `Вместо x пиши ${par(x0)}: y = ${subst(k, b, x0)}.` },
+      diagnose: () => `При x = ${fmt(x0)} по формуле y = ${fmt(y0)}, а у точки y = ${fmt(yP)}. ${on ? 'Совпало — значит, лежит.' : 'Не совпало — значит, не лежит.'}`,
+      solution: `<p>Подставляем x = ${fmt(x0)}: y = ${subst(k, b, x0)} = ${fmt(y0)}.</p>
+        <p>У точки B y = ${fmt(yP)}. ${on ? 'Совпадает — точка <b>лежит</b> на графике.' : 'Не совпадает — точка <b>не лежит</b> на графике.'}</p>
+        ${graph({ x: x0, y: yP })}`
+    };
+  }
+
+  if (kind === 'ox') {
+    k = pick([-3, -2, -1, 1, 2, 3]);
+    const r = pick([ri(-4, -1), ri(1, 4)]);
+    b = -k * r;
+    const g = `y = ${rhs(k, b, false)}`;
+    return {
+      q: `Где график функции ${g} пересекает ось x? Впиши координату x этой точки.`, answer: r,
+      check: { label: 'Проверь: подставь свой x в формулу. y =', target: 0, compute: v => round6(k * v + b) },
+      diagnose(v) {
+        if (eq(v, b)) return `${fmt(b)} — это где прямая пересекает ось y (там x = 0). А на оси x равен нулю <b>y</b>: реши 0 = ${rhs(k, b, false)}.`;
+        if (eq(v, -r)) return `Знак потерялся. Реши аккуратно: 0 = ${rhs(k, b, false)}.`;
+        return `На оси x у всех точек y = 0. Напиши 0 вместо y и реши уравнение: 0 = ${rhs(k, b, false)}.`;
+      },
+      solution: `<p>На оси x у всех точек y = 0. Пишем 0 вместо y:</p>
+        <p>0 = ${rhs(k, b, false)}<br>${termStr(k, 'x')} = ${fmt(-b)}<br>x = ${fmt(-b)} : ${par(k)} = <b>${fmt(r)}</b></p>
+        <p>Точка (${fmt(r)}; 0).</p>${graph({ x: r, y: 0 })}`
+    };
+  }
+
+  if (kind === 'oy') {
+    if (!b) b = pick([-5, -3, 2, 4, 6]);
+    const g = `y = ${rhs(k, b, cf)}`;
+    return {
+      q: `Где график функции ${g} пересекает ось y? Впиши координату y этой точки.`, answer: b,
+      diagnose(v) {
+        if (eq(v, -b / k)) return 'Это точка на оси x. А на оси y равен нулю <b>x</b>: подставь x = 0.';
+        if (eq(v, k)) return `${fmt(k)} — это k, наклон. А на оси y x = 0: подставь его в формулу.`;
+        return 'На оси y у всех точек x = 0. Подставь x = 0 в формулу.';
+      },
+      solution: `<p>На оси y у всех точек x = 0. Подставляем: y = ${subst(k, b, 0)} = <b>${fmt(b)}</b>.</p>
+        <p class="muted">Поэтому b в формуле y = kx + b — это место, где прямая пересекает ось y.</p>
+        ${plane({ lines: [{ k, b }], points: inPlane([0, b]) ? [{ x: 0, y: b }] : [] })}`
+    };
+  }
+
+  if (kind === 'kfind') {
+    const a = pick([-4, -3, -2, -1, 1, 2, 3, 4]); k = pick([-4, -3, -2, -1, 1, 2, 3, 4, 5]);
+    const c = k * a;
+    return {
+      q: `График функции y = kx проходит через точку (${fmt(a)}; ${fmt(c)}). Найди k.`, answer: k,
+      check: { label: `Проверь: твоё k · ${par(a)} =`, target: c, compute: v => round6(v * a) },
+      diagnose(v) {
+        if (eq(v, c * a)) return `Ты умножил. Подставь точку в формулу: ${fmt(c)} = k · ${par(a)}. Неизвестный множитель находят делением.`;
+        if (eq(v, a / c)) return `Наоборот: ${fmt(c)} = k · ${par(a)}, значит k = ${fmt(c)} : ${par(a)} — y делим на x.`;
+        if (eq(v, -k)) return 'Число верное, а знак — нет. При делении: знаки одинаковые — плюс, разные — минус.';
+        return `Подставь координаты точки в формулу y = kx: ${fmt(c)} = k · ${par(a)}.`;
+      },
+      solution: `<p>Точка лежит на графике — подставляем её координаты (x = ${fmt(a)}, y = ${fmt(c)}) в y = kx:</p>
+        <p>${fmt(c)} = k · ${par(a)}<br>k = ${fmt(c)} : ${par(a)} = <b>${fmt(k)}</b></p>
+        ${inPlane([a, c]) ? plane({ lines: [{ k, b: 0 }], points: [{ x: a, y: c }] }) : ''}`
+    };
+  }
+
+  if (kind === 'coef') {
+    const form = pick(['std', 'std', 'const', 'noB', 'frac']);
+    let text;
+    if (form === 'const') { k = 0; b = pick([-4, -2, 3, 5, 7]); text = `y = ${fmt(b)}`; }
+    else if (form === 'noB') { b = 0; text = `y = ${rhs(k, 0)}`; }
+    else if (form === 'frac') {
+      const d = pick([2, 4]), s = pick([1, -1]); k = s / d; b = pick([0, ri(-5, 5)]);
+      text = `y = ${s < 0 ? '−' : ''}${fr('x', d)}${b ? (b < 0 ? ' − ' : ' + ') + Math.abs(b) : ''}`;
+    } else { if (!b) b = pick([-5, 3]); text = `y = ${rhs(k, b, Math.random() < 0.5)}`; }
+    const ask = pick(['k', 'b']), ans = ask === 'k' ? k : b, other = ask === 'k' ? b : k;
+    return {
+      q: `Чему равен ${ask} у линейной функции ${text}? <span class="muted">(Вид линейной функции: y = kx + b.)</span>`, answer: ans,
+      diagnose(v) {
+        if (ask === 'k' && k === 0) return `x в формуле нет — значит, при x стоит 0: ${text} — это y = 0 · x ${b < 0 ? '−' : '+'} ${Math.abs(b)}. k = 0.`;
+        if (ask === 'b' && b === 0) return 'Числа без x в формуле нет — значит, b = 0.';
+        if (eq(v, other)) return 'Перепутал k и b. k — число, которое стоит при x (на него умножают x). b — число без x. Порядок записи не важен.';
+        if (eq(v, -ans)) return `Знак берётся вместе с числом: в y = 5 − 2x k = −2, а в y = 2x − 5 b = −5.`;
+        if (form === 'frac' && ask === 'k') return `${fr('x', d2(k))} — это x разделить на ${d2(k)}, то есть ${fr(1, d2(k))} · x.`;
+        return 'k — число при x, b — число без x. Знак берётся вместе с числом.';
+      },
+      solution: `<p>${text} — это y = ${fmt(k)} · x ${b < 0 ? '−' : '+'} ${fmt(Math.abs(b))}.</p><p>k = ${fmt(k)}, b = ${fmt(b)}. Ответ: <b>${fmt(ans)}</b>.</p>
+        <p class="muted">${k === 0 ? 'k = 0 — прямая горизонтальная.' : k > 0 ? 'k > 0 — прямая идёт вверх.' : 'k < 0 — прямая идёт вниз.'}</p>`
+    };
+  }
+
+  if (kind === 'linear') {
+    const [text, yes, why] = pick([
+      ['y = 3x − 1', true, 'Вид y = kx + b: k = 3, b = −1.'],
+      ['y = 5', true, 'Это y = 0 · x + 5: k = 0, b = 5. График — горизонтальная прямая.'],
+      ['y = −2', true, 'Это y = 0 · x − 2: k = 0. Горизонтальная прямая.'],
+      [`y = ${fr('x', 2)}`, true, `${fr('x', 2)} = 0,5 · x: k = 0,5, b = 0.`],
+      ['y = 4 − x', true, 'Это y = −1 · x + 4: k = −1, b = 4.'],
+      ['y = 7x', true, 'k = 7, b = 0.'],
+      ['y = x<sup>2</sup>', false, 'x в квадрате — это не линейная функция. Её график — парабола, а не прямая.'],
+      [`y = ${fr(2, 'x')}`, false, 'x в знаменателе — на x делят, а не умножают. График — не прямая.'],
+      ['y = x · x + 1', false, 'x · x = x² — x во второй степени. Не линейная.'],
+      [`y = ${fr(1, 'x')} + 3`, false, 'x в знаменателе. Не линейная.']]);
+    const ans = yes ? 'да' : 'нет';
+    return {
+      q: `Является ли функция ${text} линейной?`, answer: ans, options: YESNO, same: v => v === ans,
+      diagnose: () => why,
+      solution: `<p>${why}</p><p class="muted">Линейная — это y = kx + b: x только в первой степени и не в знаменателе. k и b могут быть любыми, даже 0.</p>`
+    };
+  }
+
+  if (kind === 'parallel') {
+    const k1 = randK(), b1 = ri(-4, 4), rel = pick(['par', 'par', 'cross', 'cross', 'same']);
+    const k2 = rel === 'cross' ? pick([-3, -2, -1, 1, 2, 3, 4].filter(v => v !== k1)) : k1;
+    let b2 = rel === 'same' ? b1 : ri(-4, 4);
+    if (rel === 'par' && b2 === b1) b2 = b1 + pick([-3, 2, 4]);
+    const ans = rel === 'par' ? 'параллельны' : rel === 'cross' ? 'пересекаются' : 'совпадают';
+    const f2 = rel === 'same' && b1 ? `y = ${rhs(k2, b2, true)}` : `y = ${rhs(k2, b2)}`;
+    return {
+      q: `Как расположены графики функций y = ${rhs(k1, b1)} и ${f2}?`, answer: ans,
+      options: ['пересекаются', 'параллельны', 'совпадают'], same: v => v === ans,
+      diagnose: () => k1 !== k2
+        ? `Сравни k: ${fmt(k1)} и ${fmt(k2)}. k — это наклон. Наклоны разные — прямые обязательно где-то встретятся.`
+        : b1 !== b2 ? `Сравни k: оба равны ${fmt(k1)} — наклон одинаковый, прямые не встретятся. А b разные — значит, это не одна и та же прямая.`
+        : 'k одинаковые и b одинаковые — присмотрись, не одна ли это формула, записанная по-разному.',
+      solution: `<p>У первой k = ${fmt(k1)}, у второй k = ${fmt(k2)}.</p>
+        <p>${k1 !== k2 ? 'k разные — наклон разный, прямые <b>пересекаются</b>.'
+          : b1 !== b2 ? `k одинаковые — наклон одинаковый. b разные (${fmt(b1)} и ${fmt(b2)}) — прямые <b>параллельны</b>.`
+          : 'k одинаковые и b одинаковые — это одна и та же прямая, графики <b>совпадают</b>.'}</p>
+        ${plane({ lines: [{ k: k1, b: b1 }, { k: k2, b: b2, color: '#c0392b' }] })}`
+    };
+  }
+
+  // word problems: what is paid once is b, what is paid for every unit is k
+  const ctx = pick(['taxi', 'taxi', 'candle', 'pool']);
+  let c, n;
+  if (ctx === 'taxi') {
+    const P = 10 * ri(5, 15), Q = pick([15, 20, 25, 30, 40]);
+    n = ri(2, 15);
+    c = { k: Q, b: P, intro: `Такси: ${P} руб. за посадку и ${Q} руб. за каждый километр.`, x: 'x км', y: 'y руб.',
+          val: `Сколько стоит поездка на ${n} км?`, inv: S => `Сколько километров можно проехать на ${S} руб.?`, invCheck: 'Проверь: поездка на твоё число км стоит',
+          one: `поездка на 1 км по условию стоит ${P} + ${Q} = ${P + Q} руб.`,
+          forgot: `${P} руб. за посадку платят один раз — их тоже надо прибавить.` };
+  } else if (ctx === 'candle') {
+    const Q = pick([2, 3, 4]), H = Q * ri(6, 10);
+    n = ri(2, H / Q - 1);
+    c = { k: -Q, b: H, intro: `Свеча высотой ${H} см сгорает на ${Q} см за каждый час.`, x: 'x ч', y: 'y см (высота свечи)',
+          val: `Какой будет высота свечи через ${n} ч?`, inv: S => `Через сколько часов высота свечи станет ${S} см?`, invCheck: 'Проверь: высота через твоё число часов',
+          one: `через 1 час свеча по условию будет ${H} − ${Q} = ${H - Q} см`,
+          forgot: `${Q} · ${n} — это сколько сгорело. А спрашивают, сколько осталось от ${H} см.` };
+  } else {
+    const V = 10 * ri(2, 9), Q = pick([5, 10, 15, 20]);
+    n = ri(2, 12);
+    c = { k: Q, b: V, intro: `В бассейне ${V} т воды. Насос добавляет по ${Q} т каждый час.`, x: 'x ч', y: 'y т',
+          val: `Сколько воды будет в бассейне через ${n} ч?`, inv: S => `Через сколько часов в бассейне будет ${S} т?`, invCheck: 'Проверь: воды через твоё число часов',
+          one: `через 1 час по условию будет ${V} + ${Q} = ${V + Q} т`,
+          forgot: `${V} т уже было в бассейне — их тоже надо прибавить.` };
+  }
+  const sub2 = pick(['formula', 'val', 'inv']);
+  const answerF = { x: c.k, '': c.b };
+  if (sub2 === 'formula') {
+    return {
+      q: `${c.intro} Запиши формулу, по которой считается ${c.y} через ${c.x}.`, answer: answerF, wide: true,
+      parseAns: s => parseLinear(String(s).replace(/^\s*[yу]\s*=\s*/i, '')), same: v => sameLinear(v, answerF),
+      formHint: 'через x, например 20x + 50', inputHint: 'Запиши правую часть формулы через x, например: 20x + 50. Буква x — латинская.',
+      check: { label: `Проверь формулу: ${c.one}. Подставь x = 1 в свою формулу:`, target: c.k + c.b, compute: v => evalLinear(v, { x: 1 }) },
+      diagnose(v) {
+        if (sameLinear(v, { x: c.k })) return `Не хватает того, что есть с самого начала: ${fmt(c.b)}. Это число без x — b.`;
+        if (sameLinear(v, { x: c.b, '': c.k })) return 'Перепутал: на x умножается то, что добавляется <b>за каждую</b> единицу. А то, что есть с самого начала, стоит без x.';
+        if (sameLinear(v, { x: -c.k, '': c.b })) return 'Знак при x: величина растёт или уменьшается со временем?';
+        return 'Что меняется за каждую единицу x? Это число стоит при x. Что есть с самого начала или платится один раз? Это число без x.';
+      },
+      solution: `<p>За каждую единицу x добавляется ${fmt(c.k)} — это k. С самого начала есть ${fmt(c.b)} — это b.</p>
+        <p>y = <b>${fmtLinear(answerF)}</b></p>`
+    };
+  }
+  const total = c.k * n + c.b;
+  if (sub2 === 'val') {
+    return {
+      q: `${c.intro} ${c.val}`, answer: total,
+      diagnose(v) {
+        if (eq(v, Math.abs(c.k) * n)) return c.forgot;
+        return `Запиши формулу: y = ${fmtLinear(answerF)}, и подставь x = ${n}.`;
+      },
+      solution: `<p>Формула: y = ${fmtLinear(answerF)}.</p><p>При x = ${n}: y = ${subst(c.k, c.b, n)} = <b>${fmt(total)}</b>.</p>`
+    };
+  }
+  return {
+    q: `${c.intro} ${c.inv(total)}`, answer: n,
+    check: { label: `${c.invCheck}:`, target: total, compute: v => round6(c.k * v + c.b) },
+    diagnose(v) {
+      if (eq(v, total / Math.abs(c.k))) return `Сначала убери то, что было с самого начала (${fmt(c.b)}), и только остаток дели на ${Math.abs(c.k)}.`;
+      return `Запиши уравнение: ${fmt(total)} = ${fmtLinear(answerF)}, и реши его.`;
+    },
+    solution: `<p>Формула: y = ${fmtLinear(answerF)}. Вместо y пишем ${fmt(total)}:</p>
+      <p>${fmt(total)} = ${fmtLinear(answerF)}<br>${termStr(c.k, 'x')} = ${fmt(total)} − ${fmt(c.b)} = ${fmt(total - c.b)}<br>
+      x = ${fmt(total - c.b)} : ${par(c.k)} = <b>${n}</b></p>
+      <p>Проверка: ${subst(c.k, c.b, n)} = ${fmt(total)} ✓</p>`
+  };
+}
+const d2 = k => Math.round(1 / Math.abs(k));
+
+// ---------- number intervals ----------
+function intervalLine(a, b, L, R) {
+  const lo = a - 2, hi = b + 2, W = 520, pad = 20, u = (W - 2 * pad) / (hi - lo), X = v => pad + (v - lo) * u;
+  let s = `<svg viewBox="0 0 ${W} 70" width="${W}" height="70" xmlns="http://www.w3.org/2000/svg">
+    <line x1="10" y1="35" x2="${W - 10}" y2="35" stroke="#333" stroke-width="1.5"/>
+    <line x1="${X(a)}" y1="35" x2="${X(b)}" y2="35" stroke="#3f6ad8" stroke-width="6"/>`;
+  for (let v = lo + 1; v < hi; v++) s += `<line x1="${X(v)}" y1="30" x2="${X(v)}" y2="40" stroke="#333"/><text x="${X(v)}" y="60" font-size="13" text-anchor="middle">${fmt(v)}</text>`;
+  s += `<circle cx="${X(a)}" cy="35" r="6" fill="${L === '[' ? '#3f6ad8' : '#fff'}" stroke="#3f6ad8" stroke-width="2.5"/>
+    <circle cx="${X(b)}" cy="35" r="6" fill="${R === ']' ? '#3f6ad8' : '#fff'}" stroke="#3f6ad8" stroke-width="2.5"/>`;
+  return s + '</svg>';
+}
+const ivStr = (a, b, L, R) => `${L}${fmt(a)}; ${fmt(b)}${R}`;
+// "[-2; 5)", "[−2;5)", "[-2, 5)" -> "[-2;5)"
+function parseInterval(str) {
+  const m = String(str || '').replace(/[−–—]/g, '-').replace(/\s+/g, '').match(/^([\[(])(-?\d+)[;,](-?\d+)([\])])$/);
+  return m ? { value: `${m[1]}${+m[2]};${+m[3]}${m[4]}`, form: 'interval' } : null;
+}
+
+function genInterval() {
+  const a = ri(-5, 2), b = a + ri(3, 7), L = pick(['[', '(']), R = pick([']', ')']);
+  const iv = ivStr(a, b, L, R), line = intervalLine(a, b, L, R);
+  const inL = L === '[', inR = R === ']';
+  const ints = []; for (let v = a; v <= b; v++) if ((v > a || inL) && (v < b || inR)) ints.push(v);
+  const rule = '<p class="muted">Квадратная скобка [ ] — конец входит (на рисунке закрашенная точка). Круглая ( ) — не входит (пустая точка).</p>';
+  const kind = pick(['count', 'member', 'member', 'write', 'write', 'edge']);
+
+  if (kind === 'count') {
+    return {
+      q: `Сколько целых чисел в промежутке ${iv}?`, answer: ints.length,
+      diagnose(v) {
+        if (eq(v, b - a + 1) && !(inL && inR)) return 'Ты посчитал оба конца. Но конец с круглой скобкой не входит.';
+        if (eq(v, b - a)) return `Выпиши все числа подряд от ${fmt(a)} до ${fmt(b)}${ints.includes(0) ? ', не забудь 0,' : ''} и вычеркни концы с круглой скобкой.`;
+        return `Выпиши все целые числа от ${fmt(a)} до ${fmt(b)} и вычеркни концы с круглой скобкой.`;
+      },
+      solution: `<p>Целые от ${fmt(a)} до ${fmt(b)}: ${Array.from({ length: b - a + 1 }, (_, i) => a + i).map(v => ints.includes(v) ? fmt(v) : `<s>${fmt(v)}</s>`).join(', ')}.</p>
+        <p>${inL ? `${fmt(a)} входит ([)` : `${fmt(a)} не входит (()`}, ${inR ? `${fmt(b)} входит (])` : `${fmt(b)} не входит ())`}. Всего: <b>${ints.length}</b>.</p>${line}${rule}`
+    };
+  }
+  if (kind === 'member') {
+    const x = pick([a, b, a, b, a + 1, b - 1, a - 1, b + 1]);
+    const ans = ints.includes(x) || (x > a && x < b) ? 'да' : 'нет';
+    const why = x === a ? `${fmt(a)} — левый конец, скобка «${L}» — ${inL ? 'входит' : 'не входит'}.`
+      : x === b ? `${fmt(b)} — правый конец, скобка «${R}» — ${inR ? 'входит' : 'не входит'}.`
+      : x > a && x < b ? `${fmt(x)} лежит между ${fmt(a)} и ${fmt(b)} — входит.` : `${fmt(x)} лежит за пределами промежутка — не входит.`;
+    return {
+      q: `Принадлежит ли число ${fmt(x)} промежутку ${iv}?`, answer: ans, options: YESNO, same: v => v === ans,
+      diagnose: () => why, solution: `<p>${why}</p>${line}${rule}`
+    };
+  }
+  if (kind === 'write') {
+    const ineq = `${fmt(a)} ${inL ? '≤' : '&lt;'} x ${inR ? '≤' : '&lt;'} ${fmt(b)}`;
+    const ans = `${L}${a};${b}${R}`;
+    return {
+      q: `Запиши в виде промежутка: ${ineq}`, answer: ans, parseAns: parseInterval, same: v => v === ans,
+      formHint: 'например (1; 3] или [−4; 2)', inputHint: 'Запиши промежуток: скобка, число, точка с запятой, число, скобка. Например: (1; 3] или [−4; 2).',
+      diagnose(v) {
+        const [, l2, n1, n2, r2] = v.match(/^([\[(])(-?\d+);(-?\d+)([\])])$/);
+        if (+n1 === a && +n2 === b) return '≤ — число входит, ставим квадратную скобку [ ]. &lt; — не входит, круглую ( ).';
+        if (+n1 === b && +n2 === a) return 'Сначала пишется меньшее число, потом большее.';
+        return `Числа берутся прямо из неравенства: ${fmt(a)} и ${fmt(b)}. Ничего прибавлять и вычитать не нужно.`;
+      },
+      solution: `<p>Числа — из неравенства: от ${fmt(a)} до ${fmt(b)}.</p>
+        <p>${inL ? `${fmt(a)} ≤ x — ${fmt(a)} входит → [` : `${fmt(a)} &lt; x — ${fmt(a)} не входит → (`}; &nbsp;
+        ${inR ? `x ≤ ${fmt(b)} — ${fmt(b)} входит → ]` : `x &lt; ${fmt(b)} — ${fmt(b)} не входит → )`}</p>
+        <p>Ответ: <b>${iv}</b></p>${line}`
+    };
+  }
+  const small = Math.random() < 0.5, ans = small ? ints[0] : ints[ints.length - 1];
+  return {
+    q: `${small ? 'Наименьшее' : 'Наибольшее'} целое число в промежутке ${iv}?`, answer: ans,
+    diagnose(v) {
+      if (eq(v, small ? a : b)) return `Скобка у ${fmt(small ? a : b)} круглая — это число не входит. Возьми соседнее, которое внутри.`;
+      return `Нарисуй промежуток на прямой и посмотри, какое целое число ${small ? 'левее всех' : 'правее всех'} внутри него.`;
+    },
+    solution: `<p>${small ? `Левый конец ${fmt(a)} ${inL ? 'входит' : 'не входит'}` : `Правый конец ${fmt(b)} ${inR ? 'входит' : 'не входит'}`} — значит, ответ <b>${fmt(ans)}</b>.</p>${line}${rule}`
+  };
+}
+
 // ---------- modules ----------
 const MODULES = [
   { id: 'neg', title: 'Сложение и вычитание отрицательных', short: 'Отрицательные', gen: genNeg,
@@ -311,6 +750,51 @@ const MODULES = [
       <li><b>Деньги:</b> −8 — это долг 8 руб. Добавили ещё долг 5 руб. — долг 13: −8 + (−5) = −13.</li></ul>`,
     oops: [['−8 + (−5) = 13', 'Долг плюс долг — это долг, а не прибыль. Модули сложены верно, но знак должен быть минус: <b>−13</b>.'],
            ['−3 − (−7) = −4', 'Вычесть −7 — значит прибавить 7: −3 + 7 = <b>4</b>. Минус перед скобкой «съедает» минус в скобке.']] },
+  { id: 'brk', title: 'Минус перед скобкой', short: 'Минус-скобка', gen: genBracket,
+    theory: `<ul>
+      <li><b>Минус — это умножение на −1.</b> −5 = (−1) · 5, &nbsp; −a = (−1) · a. И перед скобкой так же:<br>
+        <b>−(a + 4b − 4) = (−1) · (a + 4b − 4).</b></li>
+      <li><b>−1 умножается на каждое слагаемое в скобке</b> — как 3 · (a + b) = 3a + 3b:<br>
+        (−1) · a = −a, &nbsp; (−1) · 4b = −4b, &nbsp; (−1) · (−4) = +4. &nbsp; Итого: <b>−a − 4b + 4</b>.</li>
+      <li><b>Короче:</b> убираем скобку вместе с минусом перед ней — у <b>каждого</b> слагаемого знак меняется на противоположный.</li>
+      <li><b>То же в числах:</b> 10 − (3 + 2) = 10 − 5 = 5 и 10 − 3 − 2 = 5. Вычесть сумму — значит вычесть каждое слагаемое.</li>
+      <li><b>Проверка числами:</b> подставь, например, a = 1, b = 2 в выражение до и после. Числа должны совпасть.</li>
+      <li>Перед скобкой плюс — это умножение на +1, знаки не меняются: +(a − 3) = a − 3.</li></ul>`,
+    oops: [['−(a + 4b − 4) = −a + 4b − 4', 'Знак поменялся только у a. А −1 умножается на всё в скобке: (−1) · 4b = −4b, (−1) · (−4) = +4. Правильно: <b>−a − 4b + 4</b>. Проверка при a = 1, b = 2: −(1 + 8 − 4) = −5, у Пети −1 + 8 − 4 = 3 — не совпало.'],
+           ['7 − (x − 3) = 7 − x − 3', '−(x − 3) = (−1) · x + (−1) · (−3) = −x + 3. Значит 7 − x + 3 = <b>10 − x</b>. Проверка при x = 1: 7 − (1 − 3) = 9, и 10 − 1 = 9 ✓.']] },
+  { id: 'fn', title: 'Функция: формула и график', short: 'Функции', gen: genFunc,
+    theory: `<ul>
+      <li><b>Функция — это правило:</b> каждому x — ровно одно y. Формула y = 2x − 3 — это рецепт: «возьми x, умножь на 2, вычти 3».</li>
+      <li><b>Найти y по x — подставить.</b> x пишем в скобках, вместе со знаком:<br>при x = −4: y = 2 · (−4) − 3 = −8 − 3 = <b>−11</b>.</li>
+      <li><b>Найти x по y — решить уравнение.</b> y = 7: пишем 7 вместо y:<br>7 = 2x − 3 → 2x = 10 → x = <b>5</b>. Проверка: 2 · 5 − 3 = 7 ✓</li>
+      <li><b>Точка лежит на графике — значит, её координаты подходят к формуле.</b> A(2; 1) и y = 3x − 5: 3 · 2 − 5 = 1 ✓ — лежит.
+        B(−1; 2): 3 · (−1) − 5 = −8, а не 2 — не лежит.</li>
+      <li><b>Как построить график y = kx + b:</b> это прямая, хватит двух точек. Удобно взять x = 0 и x = 1, посчитать y по формуле и отметить.<br>
+        y = −2x + 1: x = 0 → y = 1; &nbsp; x = 1 → y = −1.
+        ${plane({ lines: [{ k: -2, b: 1 }], points: [{ x: 0, y: 1 }, { x: 1, y: -1 }] })}</li>
+      <li><b>y = kx + b — линейная функция.</b> k — число при x (наклон): k &gt; 0 — прямая идёт вверх, k &lt; 0 — вниз, k = 0 — горизонтально.
+        b — число без x: в этой точке прямая пересекает ось y.<br>
+        y = 5 — тоже линейная: это y = 0 · x + 5. А y = x² и y = ${fr(2, 'x')} — нет: x в квадрате или в знаменателе.</li>
+      <li><b>Пересечение с осями.</b> На оси y x = 0 → точка (0; b). На оси x y = 0 → пишем 0 вместо y и решаем уравнение.<br>
+        y = 2x − 4: с осью y — (0; −4); с осью x — 0 = 2x − 4, x = 2 → (2; 0).</li>
+      <li><b>Две прямые.</b> k одинаковые, b разные — параллельны. k разные — пересекаются.</li>
+      <li><b>Задачи.</b> То, что есть с самого начала или платится один раз, — b. То, что добавляется за каждую единицу, — k.<br>
+        Такси: 100 руб. посадка и 30 руб. за км → y = 30x + 100.</li></ul>`,
+    oops: [['y = −2x + 1: точки (0; −1) и (−1; 0)', 'Точки угаданы, а их надо посчитать. x = 0: y = −2 · 0 + 1 = <b>1</b> → (0; 1). x = −1: y = −2 · (−1) + 1 = <b>3</b> → (−1; 3).'],
+           ['Такси: 100 руб. посадка + 30 руб. за км. Формула y = x, поездка на 12 км — 360 руб.', 'Посадку забыли. За каждый км — 30 (это k), посадка один раз — 100 (это b): y = 30x + 100. 12 км: 30 · 12 + 100 = <b>460</b> руб.'],
+           ['y = 5 — не линейная, там же нет x', 'y = 5 — это y = 0 · x + 5. Линейная, k = 0. Её график — горизонтальная прямая.'],
+           ['y = 2x + 1 и y = 2x − 3 пересекаются', 'k одинаковые (2 и 2) — наклон одинаковый. Такие прямые <b>параллельны</b>, не пересекаются никогда.']] },
+  { id: 'int', title: 'Числовые промежутки', short: 'Промежутки', gen: genInterval,
+    theory: `<ul>
+      <li><b>Промежуток — все числа от одного до другого.</b> Пишут: скобка, меньшее число, точка с запятой, большее число, скобка.</li>
+      <li><b>Квадратная скобка [ ] — конец входит</b> (знаки ≤, ≥), на рисунке закрашенная точка.<br>
+        <b>Круглая ( ) — не входит</b> (знаки &lt;, &gt;), пустая точка.</li>
+      <li><b>−2 ≤ x &lt; 5 → [−2; 5).</b> Числа берём прямо из неравенства, ничего не прибавляем.
+        ${intervalLine(-2, 5, '[', ')')}</li>
+      <li>Целые числа в [−2; 5): −2, −1, 0, 1, 2, 3, 4 — <b>7 штук</b>. 5 не входит, 0 не забываем.</li>
+      <li>Если конца нет: x ≥ 3 → [3; +∞). У бесконечности скобка всегда круглая.</li></ul>`,
+    oops: [['−2 ≤ x &lt; 5 записал как (−1; 4]', 'Числа меняют не надо — они те же, что в неравенстве: −2 и 5. А скобки показывают, входит ли конец: ≤ → [, &lt; → ). Ответ: <b>[−2; 5)</b>.'],
+           ['5 принадлежит промежутку [−2; 5)', 'У 5 круглая скобка — 5 <b>не входит</b>. Входят числа, сколь угодно близкие к 5: 4, 4,9, 4,99…']] },
   { id: 'pow', title: 'Степени отрицательных чисел', short: 'Степени', gen: genPow,
     theory: `<ul>
       <li><b>Степень — это умножение одинаковых множителей:</b> 3<sup>2</sup> = 3 · 3, а не 3 · 2.</li>
@@ -450,7 +934,9 @@ function renderTask() {
         <div class="choices">${task.predict.options.map(o => `<label><input type="radio" name="pred" value="${o}"><span>${o}</span></label>`).join('')}</div></div>` : ''}
       ${task.scaffold ? `<div class="step"><div class="step-lbl">① ${task.scaffold.label}</div><input type="text" id="scaf" autocomplete="off"></div>` : ''}
       <div class="step"><div class="step-lbl">${task.predict || task.scaffold ? '②' : ''} Ответ${task.formHint ? ` <span class="muted">(${task.formHint})</span>` : ''}:</div>
-        <input type="text" id="ans" autocomplete="off"></div>
+        ${task.options
+          ? `<div class="choices">${task.options.map(o => `<label><input type="radio" name="ans" value="${o}"><span>${o}</span></label>`).join('')}</div>`
+          : `<input type="text" id="ans" autocomplete="off"${task.wide ? ' style="width:320px"' : ''}>`}</div>
       ${task.check ? `<div class="step"><div class="step-lbl">③ ${task.check.label}</div><input type="text" id="chk" autocomplete="off"></div>` : ''}
       <div class="row" id="buttons">
         <button class="main" data-conf="sure">Проверить — уверен</button>
@@ -489,8 +975,10 @@ function submit(conf) {
     if (!scaf) return feedback('warn', 'Заполни пункт ① — это подсказка к ответу.');
     if (!eq(scaf.value, task.scaffold.answer)) return feedback('warn', `Пункт ① пока не так. ${task.scaffold.hint}`);
   }
-  const p = parse(document.getElementById('ans').value);
-  if (!p) return feedback('warn', 'Впиши ответ числом. Дробь — через косую черту (5/2), смешанное число — через пробел (1 3/4), десятичная — через запятую.');
+  const typed = task.options ? app.querySelector('input[name=ans]:checked')?.value || '' : document.getElementById('ans').value.trim();
+  const p = task.options ? (typed ? { value: typed, form: 'choice' } : null) : (task.parseAns || parse)(typed);
+  if (!p && task.options) return feedback('warn', 'Выбери ответ.');
+  if (!p) return feedback('warn', task.inputHint ||'Впиши ответ числом. Дробь — через косую черту (5/2), смешанное число — через пробел (1 3/4), десятичная — через запятую.');
   let chk = null;
   if (task.check) {
     chk = parse(document.getElementById('chk').value);
@@ -507,21 +995,27 @@ function submit(conf) {
     return selfCatch(`Ты прикинул, что ответ будет ${pred}, чем ${fmt(task.predict.ref)}, а написал ${fmt(p.value)}. Что-то одно неверно.`);
   if (task.check) {
     const own = task.check.compute ? task.check.compute(p.value) : null;
+    // A letter that is not in the task has no value to substitute: say so instead of showing NaN.
+    if (own !== null && !Number.isFinite(own))
+      return feedback('warn', 'В ответе есть буква, которой нет в задаче. Пиши только те буквы, что в условии, латиницей.');
     if (!eq(chk.value, task.check.target))
       return selfCatch(`Проверка дала ${fmt(chk.value)}, а должно получиться ${fmt(task.check.target)}.`);
     if (own !== null && !eq(own, task.check.target))
-      return feedback('warn', `Посчитай проверку ещё раз: если подставить x = ${fmt(p.value)}, слева получится ${fmt(round6(own))}, а не ${fmt(chk.value)}.`);
+      return feedback('warn', task.parseAns
+        ? `Посчитай проверку ещё раз: если подставить эти числа в твой ответ, получится ${fmt(round6(own))}, а не ${fmt(chk.value)}.`
+        : `Посчитай проверку ещё раз: с твоим ответом ${fmt(p.value)} получается ${fmt(round6(own))}, а не ${fmt(chk.value)}.`);
   }
 
   // 3. Grade.
-  const right = eq(p.value, task.answer) && (!task.form || p.form === task.form);
-  const rightValueWrongForm = eq(p.value, task.answer) && task.form && p.form !== task.form;
+  const valueRight = task.same ? task.same(p.value) : eq(p.value, task.answer);
+  const right = valueRight && (!task.form || p.form === task.form);
+  const rightValueWrongForm = valueRight && task.form && p.form !== task.form;
   if (rightValueWrongForm) return feedback('warn', `Значение верное, но запиши в нужном виде. ${task.formHint}`);
   const predWrong = task.predict && pred !== task.predict.correct;
 
   session.tries++;
   if (conf === 'sure') { s.sure++; if (!right) s.sureWrong++; }
-  log(taskMod, task, document.getElementById('ans').value.trim(), conf, right);
+  log(taskMod, task, typed, conf, right);
 
   if (right) {
     session.finished = true;
@@ -535,15 +1029,17 @@ function submit(conf) {
     feedback('ok', `<b>Верно!</b> ${session.caught ? 'И ошибку ты нашёл сам — так и надо.' : ''}
       ${predWrong ? `<br>А вот прикидка была неточной: правильно «${task.predict.correct}». Подумай, почему.` : ''}
       ${newly ? '<br>🎉 <b>5 подряд — тема на сегодня освоена!</b> Можно перейти к другой теме или к «Перемешке».' : ''}`,
-      `<details><summary>Посмотреть решение</summary><div class="solution">${task.solution}</div></details>
+      `<div class="solution"><div class="step-lbl">Сравни со своим решением:</div>${task.solution}</div>
        <div class="row"><button class="main" id="next">Следующая →</button></div>`);
     document.getElementById('next').onclick = nextTask;
-    document.getElementById('next').focus();
+    // No focus on "next": an Enter pressed out of habit would skip the solution unread.
     return;
   }
 
   s.streak = 0;
-  if (session.tries === 1) {
+  // With only two options a second try is a coin flip, not a fix — show the solution at once.
+  const binary = task.options && task.options.length === 2;
+  if (session.tries === 1 && !binary) {
     save();
     const why = task.diagnose(p.value, p);
     return feedback('bad', `<b>Пока неверно.</b> ${why}${conf === 'sure' ? '<br><span class="muted">Ты был уверен — запомни, какая проверка поймала бы эту ошибку.</span>' : ''}<br>Попробуй ещё раз.`);
@@ -551,7 +1047,7 @@ function submit(conf) {
   session.finished = true;
   if (session.mod === MIX) { session.mixLeft--; session.mixDone++; }
   save();
-  feedback('bad', `<b>Разберём решение.</b>`,
+  feedback('bad', binary ? '<b>Неверно. Разберём:</b>' : '<b>Разберём решение.</b>',
     `<div class="solution">${task.solution}</div>
      <div class="row"><button class="main" id="next">Следующая →</button></div>`);
   document.getElementById('next').onclick = nextTask;
@@ -560,7 +1056,7 @@ function submit(conf) {
 // `typed` is kept as written: "4/2" and "2" are the same number but different mistakes.
 function log(mod, task, typed, conf, right) {
   store.log.push({ d: new Date().toISOString().slice(0, 16), m: mod.id,
-    q: task.q.replace(/<span class="fr"><span>(.*?)<\/span><span>(.*?)<\/span><\/span>/g, ' $1/$2').replace(/<sup>(.*?)<\/sup>/g, '^$1').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
+    q: task.q.replace(/<span class="fr"><span>(.*?)<\/span><span>(.*?)<\/span><\/span>/g, ' $1/$2').replace(/<sup>(.*?)<\/sup>/g, '^$1').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(),
     a: typed, c: conf, ok: right, t: session.tries });
   if (store.log.length > 400) store.log.splice(0, store.log.length - 400);
 }
