@@ -21,6 +21,7 @@
   .card { background: var(--card); border-radius: 14px; padding: 22px 24px;
           box-shadow: 0 1px 3px rgba(0,0,0,.08); margin: 16px 0; }
   .mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .mods h3.sec { grid-column: 1 / -1; margin: 10px 0 -4px; font-size: 16px; color: var(--muted); }
   .mod-btn { text-align: left; border: 2px solid var(--line); background: var(--card); border-radius: 12px;
              padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; }
   .mod-btn:hover { border-color: var(--accent); }
@@ -837,6 +838,17 @@ const MODULES = [
 ];
 const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемешка', size: 10 };
 
+// Topic numbers follow the course: the 5–6 grade base first, then the chapters of
+// «Алгебра 7» (Макарычев и др.), then what the textbook leaves for grade 8.
+const SECTIONS = [
+  { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'mix', 'neg', 'unk'] },
+  { title: 'Учебник, глава 1. Выражения, тождества, уравнения', ids: ['brk'] },
+  { title: 'Учебник, глава 2. Функции', ids: ['fn'] },
+  { title: 'Учебник, глава 3. Степень с натуральным показателем', ids: ['pow'] },
+  { title: 'Из учебника 8 класса', ids: ['int'] },
+];
+SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
+
 // ---------- storage ----------
 const KEY = 'algebra7-trainer-v1';
 let store = JSON.parse(localStorage.getItem(KEY) || '{}');
@@ -872,12 +884,13 @@ function home() {
                 <span>Сам поймал ошибок: <b>${caught}</b></span></p>` : ''}
     </div>
     <div class="mods">
-      ${MODULES.map(m => {
+      ${SECTIONS.map(sec => `<h3 class="sec">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
         const s = st(m.id), done = s.mastered.includes(today());
-        return `<button class="mod-btn" data-mod="${m.id}"><b>${m.title}</b>
+        return `<button class="mod-btn" data-mod="${m.id}"><b>${m.n}. ${m.title}</b>
           <small>решено ${s.solved}, верно с первой попытки ${s.firstTry}</small>
           <span class="badge${done ? ' done' : ''}">${done ? 'сегодня освоено ✓' : `серия ${s.streak} из 5`}</span></button>`;
-      }).join('')}
+      }).join('')).join('')}
+      <h3 class="sec">Всё вместе</h3>
       <button class="mod-btn mix" data-mod="${MIX.id}"><b>${MIX.title}</b>
         <small>${MIX.size} задач из всех тем вперемешку. Делать в конце каждого занятия.</small></button>
     </div>
@@ -895,7 +908,7 @@ function intro(mod) {
   app.innerHTML = `
     <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button></div>
     <div class="card theory">
-      <h2>${mod.title}</h2>
+      <h2>${mod.n}. ${mod.title}</h2>
       <h3>Как думать</h3>${mod.theory}
       <h3>Найди ошибку Пети</h3>
       ${mod.oops.map(([wrong, why], i) => `<div class="oops"><b>Петя написал: ${wrong}</b>
@@ -925,7 +938,7 @@ function renderTask() {
   app.innerHTML = `
     <div class="row between" style="margin-top:0">
       <button class="ghost" id="back">← Все темы</button>
-      <span class="muted">${isMix ? `Перемешка: задача ${session.mixDone + 1} из ${MIX.size}` : taskMod.title}</span>
+      <span class="muted">${isMix ? `Перемешка: задача ${session.mixDone + 1} из ${MIX.size}` : `${taskMod.n}. ${taskMod.title}`}</span>
     </div>
     <div class="card">
       ${isMix ? '' : `<div class="streak">${[0, 1, 2, 3, 4].map(i => `<span class="${i < Math.min(s.streak, 5) ? 'on' : ''}"></span>`).join('')}</div>`}
