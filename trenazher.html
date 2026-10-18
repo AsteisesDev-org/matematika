@@ -34,6 +34,9 @@
   .stages { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; }
   .stage { font: inherit; font-size: 15px; padding: 5px 12px; border-radius: 99px; border: 2px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
   .stage.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; cursor: default; }
+  .help { border-color: var(--warn); color: var(--warn); }
+  .help.pulse { background: var(--warn); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.04); box-shadow: 0 0 0 6px rgba(201, 130, 43, .25); } }
   .mods h3.sec { grid-column: 1 / -1; margin: 10px 0 -4px; font-size: 16px; color: var(--muted); }
   .mod-btn { text-align: left; border: 2px solid var(--line); background: var(--card); border-radius: 12px;
              padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; }
@@ -920,8 +923,10 @@ function genFunc() {
         if (eq(v, -k)) return 'Число верное, а знак — нет. При делении: знаки одинаковые — плюс, разные — минус.';
         return `Подставь координаты точки в формулу y = kx: ${fmt(c)} = k · ${par(a)}.`;
       },
-      solution: `<p>Точка лежит на графике — подставляем её координаты (x = ${fmt(a)}, y = ${fmt(c)}) в y = kx:</p>
-        <p>${fmt(c)} = k · ${par(a)}<br>k = ${fmt(c)} : ${par(a)} = <b>${fmt(k)}</b></p>
+      solution: `<p>Точка (${fmt(a)}; ${fmt(c)}) лежит на графике — значит, при x = ${fmt(a)} по формуле получается y = ${fmt(c)}.</p>
+        <p>Подставляем эти числа в y = kx вместо x и y: &nbsp; ${fmt(c)} = k · ${par(a)}</p>
+        <p>Теперь k — неизвестный множитель. Его находят делением: произведение делим на известный множитель.<br>k = ${fmt(c)} : ${par(a)} = <b>${fmt(k)}</b></p>
+        <p class="muted">Проверка: ${fmt(k)} · ${par(a)} = ${fmt(c)} ✓</p>
         ${inPlane([a, c]) ? plane({ lines: [{ k, b: 0 }], points: [{ x: a, y: c }] }) : ''}`
     };
   }
@@ -947,7 +952,7 @@ function genFunc() {
         return 'k — число при x, b — число без x. Знак берётся вместе с числом.';
       },
       solution: `<p>${text} — это y = ${fmt(k)} · x ${b < 0 ? '−' : '+'} ${fmt(Math.abs(b))}.</p><p>k = ${fmt(k)}, b = ${fmt(b)}. Ответ: <b>${fmt(ans)}</b>.</p>
-        <p class="muted">${k === 0 ? 'k = 0 — прямая горизонтальная.' : k > 0 ? 'k > 0 — прямая идёт вверх.' : 'k < 0 — прямая идёт вниз.'}</p>`
+        <p class="muted">${k === 0 ? 'k = 0 — прямая горизонтальная.' : k > 0 ? 'k &gt; 0 — прямая идёт вверх.' : 'k &lt; 0 — прямая идёт вниз.'}</p>`
     };
   }
 
@@ -1731,7 +1736,7 @@ function nextTask() {
   if (session.mod === MIX && session.mixLeft === 0) return mixSummary();
   // Mix draws only from topics whose theory is done: no tasks from a topic he has not opened yet.
   const m = session.mod === MIX ? pick(MODULES.filter(theoryDone)) : session.mod;
-  Object.assign(session, { task: m.gen(), taskMod: m, tries: 0, caught: false, finished: false });
+  Object.assign(session, { task: m.gen(), taskMod: m, tries: 0, caught: false, finished: false, hints: 0, hintSteps: null, fails: 0 });
   renderTask();
 }
 
@@ -1766,8 +1771,11 @@ function renderTask() {
         <button class="ghost" data-conf="doubt">Проверить — сомневаюсь</button>
       </div>
       <div id="feedback"></div>
+      <div class="row" id="helprow"><button class="ghost help" id="help">🆘 Не знаю, как решать — покажи шаг</button><span class="think" id="stuck"></span></div>
+      <div id="hintbox"></div>
     </div>`;
   document.getElementById('back').onclick = home;
+  document.getElementById('help').onclick = showHint;
   if (!isMix) wireStages(taskMod);
   app.querySelectorAll('[data-conf]').forEach(b => b.onclick = () => submit(b.dataset.conf));
   app.querySelectorAll('input[type=text]').forEach((inp, i, all) => inp.onkeydown = e => {
@@ -1783,6 +1791,61 @@ function renderTask() {
 function feedback(kind, html, extra = '') {
   document.getElementById('feedback').innerHTML = `<div class="msg ${kind}">${html}</div>${extra}`;
   document.getElementById('buttons').hidden = session.finished;
+  document.getElementById('helprow').hidden = session.finished;
+  // Any unsuccessful press counts — a missing check or a wrong step blocks him as surely as a wrong answer.
+  if (!session.finished && kind !== 'ok' && ++session.fails >= 3 && session.hints === 0) {
+    document.getElementById('help').classList.add('pulse');
+    document.getElementById('stuck').textContent = 'Застрял? Нажми 🆘 — разберём решение по шагам.';
+  }
+}
+
+// Solution split into steps: every paragraph, and every line of a paragraph broken by <br>.
+// A picture goes with the step before it.
+function solutionSteps(html) {
+  const box = document.createElement('div');
+  box.innerHTML = html;
+  const steps = [];
+  for (const el of [...box.children]) {
+    if (el.tagName === 'P') {
+      const cls = el.className ? ` class="${el.className}"` : '';
+      el.innerHTML.split(/<br\s*\/?>/i).map(s => s.trim()).filter(Boolean).forEach(s => steps.push(`<p${cls}>${s}</p>`));
+    } else if (steps.length) steps[steps.length - 1] += el.outerHTML;
+    else steps.push(el.outerHTML);
+  }
+  return steps.length ? steps : [html];
+}
+
+// "Не знаю, как решать": each press opens one more step of the solution. Once the whole
+// solution has been read the task does not count, and he gets a similar one to do himself.
+function showHint() {
+  const { task, taskMod } = session;
+  if (session.finished) return;
+  const steps = session.hintSteps || (session.hintSteps = solutionSteps(task.solution));
+  session.hints++;
+  const help = document.getElementById('help'), box = document.getElementById('hintbox');
+  help.classList.remove('pulse');
+  document.getElementById('stuck').textContent = '';
+  document.getElementById('feedback').innerHTML = '';
+  box.innerHTML = `<div class="solution"><div class="step-lbl">Решаем по шагам — шаг ${session.hints} из ${steps.length}:</div>${steps.slice(0, session.hints).join('')}</div>`;
+  if (session.hints < steps.length) {
+    help.textContent = `🆘 Покажи следующий шаг (${session.hints + 1} из ${steps.length})`;
+    box.insertAdjacentHTML('beforeend', '<p class="muted">Попробуй дальше сам. Не получается — открой ещё шаг.</p>');
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return;
+  }
+  const s = st(taskMod.id);
+  session.finished = true;
+  s.streak = 0;
+  s.helped = (s.helped || 0) + 1;
+  if (session.mod === MIX) { session.mixLeft--; session.mixDone++; }
+  log(taskMod, task, '(разобрал с помощью)', '', false);
+  save();
+  document.getElementById('buttons').hidden = true;
+  document.getElementById('helprow').hidden = true;
+  box.insertAdjacentHTML('beforeend', `<div class="msg info">Теперь ты видел, как это решается. <b>Реши похожую сам</b> — так навык и появляется.</div>
+    <div class="row"><button class="main" id="next">Реши похожую сам →</button></div>`);
+  document.getElementById('next').onclick = nextTask;
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function submit(conf) {
@@ -1857,11 +1920,14 @@ function submit(conf) {
   if (right) {
     session.finished = true;
     s.solved++;
-    if (session.tries === 1) { s.firstTry++; s.streak++; } else s.streak = 0;
+    // Solved after looking at hints: counts as solved, but not as "on his own" — the streak restarts.
+    const alone = session.tries === 1 && !session.hints;
+    if (alone) { s.firstTry++; s.streak++; } else s.streak = 0;
+    if (session.hints) s.helped = (s.helped || 0) + 1;
     if (session.caught) s.selfCaught++;
     let newly = false;
     if (s.streak >= 5 && !s.mastered.includes(today())) { s.mastered.push(today()); newly = true; }
-    if (session.mod === MIX) { session.mixLeft--; session.mixDone++; if (session.tries === 1) session.mixRight++; }
+    if (session.mod === MIX) { session.mixLeft--; session.mixDone++; if (alone) session.mixRight++; }
     save();
     feedback('ok', `<b>Верно!</b> ${session.caught ? 'И ошибку ты нашёл сам — так и надо.' : ''}
       ${predWrong ? `<br>А вот прикидка была неточной: правильно «${task.predict.correct}». Подумай, почему.` : ''}
@@ -1913,7 +1979,7 @@ function resultsText() {
   for (const m of MODULES) {
     const s = st(m.id);
     if (!s.solved && !s.sure) continue;
-    lines.push(`${m.short}: решено ${s.solved}, с 1-й попытки ${s.firstTry}, уверен-но-неверно ${s.sureWrong}/${s.sure}, сам поймал ${s.selfCaught}, освоено: ${s.mastered.join(', ') || '—'}`);
+    lines.push(`${m.short}: решено ${s.solved}, с 1-й попытки ${s.firstTry}, уверен-но-неверно ${s.sureWrong}/${s.sure}, сам поймал ${s.selfCaught}, брал помощь ${s.helped || 0}, освоено: ${s.mastered.join(', ') || '—'}`);
   }
   const errs = store.log.filter(e => !e.ok).slice(-20);
   if (errs.length) {
