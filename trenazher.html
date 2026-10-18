@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Алгебра 7: тренажёр</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233f6ad8'/%3E%3Ctext x='29' y='46' font-family='Georgia,serif' font-size='40' font-style='italic' fill='white' text-anchor='middle'%3Ex%3C/text%3E%3Ctext x='49' y='28' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3E2%3C/text%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f6f7fb; --card: #fff; --ink: #1d2433; --muted: #6b7385;
@@ -65,6 +66,16 @@
   details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
   .theory ul { margin: 6px 0; padding-left: 22px; }
   .theory li { margin: 4px 0; }
+  .hook { font-size: 19px; }
+  .lex { border-top: 2px solid var(--line); margin-top: 18px; padding-top: 12px; }
+  .lex-h { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .lproblem { font-size: 23px; margin: 6px 0 4px; }
+  .lsteps { padding-left: 26px; margin: 6px 0; }
+  .lstep { margin: 12px 0; }
+  .lmath { font-size: 21px; font-weight: 600; }
+  .lwhy { font-size: 17px; background: var(--accent-soft); border-radius: 8px; padding: 6px 12px; margin-top: 4px; }
+  .think { width: 100%; color: var(--muted); font-size: 16px; }
+  .rule { background: var(--ok-soft); border-radius: 10px; padding: 6px 18px 10px; margin: 18px 0; }
   .oops { background: var(--warn-soft); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
   table.t { border-collapse: collapse; margin: 8px 0; font-size: 16px; }
   table.t td, table.t th { border: 1.5px solid var(--line); padding: 5px 10px; }
@@ -90,7 +101,7 @@ const decimals = x => { const s = String(round6(x)); return s.includes('.') ? s.
 
 // Accepts "-5", "−5", "0,06", "0.06", "5/2", "2 1/2". Returns {value, form} or null.
 function parse(str) {
-  const s = String(str || '').trim().replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/\s+/g, ' ');
+  const s = String(str || '').trim().replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/\s+/g, ' ').replace(/^\+\s*/, '');
   let m;
   if ((m = s.match(/^(-?)(\d+) (\d+)\/(\d+)$/))) {
     const v = +m[2] + +m[3] / +m[4];
@@ -387,6 +398,363 @@ function genBracket() {
       <p>Умножаем −1 на каждое слагаемое:<br>${products}</p>
       <p>Ответ: <b>${fmtLinear(answer, all)}</b></p>
       <p class="muted">У каждого слагаемого в скобке знак сменился на противоположный: плюс стал минусом, минус — плюсом.</p>`
+  };
+}
+
+// ---------- steps, expressions with brackets, equations ----------
+// A step (scaffold or a lesson "your turn") is {label, answer, hint, parse?, same?, ok?, inputHint?}.
+const scaffoldsOf = task => task.scaffolds || (task.scaffold ? [task.scaffold] : []);
+const stepRight = (sc, v) => sc.same ? sc.same(v) : sc.ok ? sc.ok(v) : eq(v, sc.answer);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Russian noun after a number: 1 яблоко, 3 яблока, 5 яблок, 21 яблоко, 12 яблок.
+const pl = (n, one, few, many) => {
+  const a = Math.abs(n) % 100, b = a % 10;
+  return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many;
+};
+const gcd = (a, b) => b ? gcd(b, a % b) : Math.abs(a);
+const lcm = (a, b) => a / gcd(a, b) * b;
+
+// Linear expression with brackets: "x + (x + 8)", "3x + 2(x + 5)", "x/2". Returns map or null.
+function parseExprMap(str) {
+  const s = String(str || '').toLowerCase().replace(/[асхуеорк]/g, ch => LOOKALIKE[ch])
+    .replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/[·×]/g, '*').replace(/:/g, '/').replace(/\s+/g, '');
+  let i = 0;
+  const isConst = t => Object.keys(t).every(k => k === '');
+  const scale = (t, c) => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v * c]));
+  function expr() {
+    let v = term();
+    while (v && (s[i] === '+' || s[i] === '-')) {
+      const op = s[i++], t = term();
+      if (!t) return null;
+      v = addLinear(v, op === '+' ? t : negLinear(t));
+    }
+    return v;
+  }
+  function term() {
+    let v = factor();
+    while (v && i < s.length && /[*\/a-z0-9(]/.test(s[i])) {
+      const op = s[i] === '*' || s[i] === '/' ? s[i++] : '*', f = factor();
+      if (!f) return null;
+      if (op === '/') { if (!isConst(f) || !f['']) return null; v = scale(v, 1 / f['']); }
+      else if (isConst(f)) v = scale(v, f[''] || 0);
+      else if (isConst(v)) v = scale(f, v[''] || 0);
+      else return null;                       // x · x is not linear
+    }
+    return v;
+  }
+  function factor() {
+    if (s[i] === '+') { i++; return factor(); }
+    if (s[i] === '-') { i++; const f = factor(); return f && negLinear(f); }
+    if (s[i] === '(') { i++; const e = expr(); if (!e || s[i] !== ')') return null; i++; return e; }
+    const m = s.slice(i).match(/^\d+(\.\d+)?/);
+    if (m) { i += m[0].length; return { '': +m[0] }; }
+    if (/[a-z]/.test(s[i] || '')) return { [s[i++]]: 1 };
+    return null;
+  }
+  if (!s) return null;
+  const v = expr();
+  if (!v || i !== s.length) return null;
+  for (const k in v) if (eq(v[k], 0)) delete v[k];
+  return v;
+}
+const parseExpr = str => { const v = parseExprMap(str); return v ? { value: v, form: 'expr' } : null; };
+// "x + (x + 8) = 46" -> left minus right as a map.
+function parseEq(str) {
+  const parts = String(str || '').split('=');
+  if (parts.length !== 2) return null;
+  const l = parseExprMap(parts[0]), r = parseExprMap(parts[1]);
+  if (!l || !r) return null;
+  // "x = 19" is equivalent to the equation, but it is the answer, not an equation built from the text.
+  const bareX = m => Object.keys(m).length === 1 && m.x === 1, num = m => Object.keys(m).every(k => k === '');
+  return { value: addLinear(l, negLinear(r)), form: 'eq', solved: (bareX(l) && num(r)) || (bareX(r) && num(l)) };
+}
+const notSolved = p => p.solved ? 'Это уже ответ, а не уравнение. Сначала запиши уравнение по условию: что вместе равно чему.' : null;
+// Same equation up to moving terms and multiplying both sides: 2x + 8 = 46 ~ x + x + 8 − 46 = 0.
+function sameEquation(d, target) {
+  const k = Object.keys(target).find(q => target[q]);
+  if (!k || !d[k]) return false;
+  const c = d[k] / target[k];
+  return sameLinear(d, Object.fromEntries(Object.entries(target).map(([q, v]) => [q, v * c])));
+}
+const eqStr = (l, r) => `${fmtLinear(l, ['x', ''])} = ${fmtLinear(r, ['x', ''])}`;
+
+// ---------- pictures ----------
+// Balance scale: equal sides stay level; otherwise the heavier pan goes down.
+function balance(left, right, level = true, rightHeavier = true) {
+  return `<svg viewBox="0 0 320 125" width="320" height="125" xmlns="http://www.w3.org/2000/svg">
+    <g transform="rotate(${level ? 0 : rightHeavier ? 7 : -7} 160 78)">
+      <rect x="10" y="38" width="130" height="32" rx="8" fill="#e6ecfb" stroke="#3f6ad8" stroke-width="1.5"/>
+      <text x="75" y="59" text-anchor="middle" font-size="15">${left}</text>
+      <rect x="180" y="38" width="130" height="32" rx="8" fill="#e6ecfb" stroke="#3f6ad8" stroke-width="1.5"/>
+      <text x="245" y="59" text-anchor="middle" font-size="15">${right}</text>
+      <line x1="75" y1="70" x2="75" y2="78" stroke="#333" stroke-width="2"/><line x1="245" y1="70" x2="245" y2="78" stroke="#333" stroke-width="2"/>
+      <line x1="30" y1="78" x2="290" y2="78" stroke="#333" stroke-width="3"/></g>
+    <polygon points="160,78 146,115 174,115" fill="#6b7385"/>
+    <text x="160" y="16" text-anchor="middle" font-size="13" fill="${level ? '#2e8b57' : '#c0392b'}" font-weight="700">${level ? 'равны — равновесие' : 'не равны — перекос'}</text></svg>`;
+}
+// Fraction strips: each row is a whole cut into d pieces with n of them shaded (n may exceed d).
+function bars(rows) {
+  const W = 240, H = 26, gap = 12, lab = 70;
+  const width = lab + Math.max(...rows.map(r => Math.max(1, Math.ceil(r.n / r.d)))) * (W + 8) + 10;
+  let s = `<svg viewBox="0 0 ${width} ${rows.length * (H + gap)}" width="${width}" height="${rows.length * (H + gap)}" xmlns="http://www.w3.org/2000/svg">`;
+  rows.forEach((r, k) => {
+    const y = k * (H + gap) + 4, wholes = Math.max(1, Math.ceil(r.n / r.d)), cw = W / r.d;
+    s += `<text x="${lab - 10}" y="${y + 18}" text-anchor="end" font-size="15" font-weight="700">${r.label}</text>`;
+    for (let w = 0; w < wholes; w++) for (let c = 0; c < r.d; c++) {
+      const idx = w * r.d + c, x = lab + w * (W + 8) + c * cw;
+      s += `<rect x="${x}" y="${y}" width="${cw}" height="${H}" fill="${idx < r.n ? (r.color || '#3f6ad8') : '#fff'}" stroke="#333" stroke-width="1"/>`;
+    }
+  });
+  return s + '</svg>';
+}
+const barRow = (n, d, color) => ({ n, d, color, label: `${n}/${d}` });
+// Bar model for word problems: rows of labelled segments and the total on the right.
+function modelBars(rows, total) {
+  const u = 4, lab = 110;
+  const widths = rows.map(r => r.segs.reduce((s, [, w]) => s + w, 0)), maxW = Math.max(...widths) * u;
+  let s = `<svg viewBox="0 0 ${lab + maxW + 120} ${rows.length * 40 + 6}" width="${lab + maxW + 120}" height="${rows.length * 40 + 6}" xmlns="http://www.w3.org/2000/svg">`;
+  rows.forEach((r, k) => {
+    const y = k * 40 + 6;
+    s += `<text x="${lab - 8}" y="${y + 19}" text-anchor="end" font-size="14">${r.name}</text>`;
+    let x = lab;
+    for (const [text, w, color] of r.segs) {
+      s += `<rect x="${x}" y="${y}" width="${w * u}" height="28" fill="${color || '#e6ecfb'}" stroke="#3f6ad8"/>
+        <text x="${x + w * u / 2}" y="${y + 19}" text-anchor="middle" font-size="14" font-weight="700">${text}</text>`;
+      x += w * u;
+    }
+  });
+  s += `<path d="M${lab + maxW + 8},6 h8 v${rows.length * 40 - 12} h-8 M${lab + maxW + 16},${rows.length * 20} h6" fill="none" stroke="#333" stroke-width="1.5"/>
+    <text x="${lab + maxW + 28}" y="${rows.length * 20 + 5}" font-size="15" font-weight="700">${total}</text>`;
+  return s + '</svg>';
+}
+
+// ---------- fractions ----------
+function genFrac() {
+  let b, d;
+  do { b = ri(2, 10); d = ri(2, 10); } while (b === d || ((b % d === 0 || d % b === 0) && Math.random() < 0.6));
+  let a = ri(1, b - 1), c = ri(1, d - 1);
+  const op = Math.random() < 0.65 ? '+' : '−';
+  if (op === '−' && a / b <= c / d) { [a, b, c, d] = [c, d, a, b]; }
+  if (op === '−' && eq(a / b, c / d)) return genFrac();
+  const L = lcm(b, d), m1 = L / b, m2 = L / d;
+  const num = op === '+' ? a * m1 + c * m2 : a * m1 - c * m2, g = gcd(num, L);
+  const ans = num / L, big = a / b > c / d ? [a, b] : [c, d];
+  const wrongDen = op === '+' ? (a + c) / (b + d) : (b - d !== 0 ? (a - c) / (b - d) : NaN);
+  return {
+    q: `${fr(a, b)} ${op} ${fr(c, d)}`, answer: ans, expr: true,
+    formHint: 'дробью через косую черту, например 5/6',
+    predict: op === '+'
+      ? { label: `Прикинь: ответ будет больше или меньше, чем ${fr(big[0], big[1])}?`, options: ['больше', 'меньше'], correct: 'больше', ref: big[0] / big[1] }
+      : { label: `Прикинь: ответ будет больше или меньше, чем ${fr(a, b)}?`, options: ['больше', 'меньше'], correct: 'меньше', ref: a / b },
+    scaffold: { label: `Общий знаменатель — число, которое делится и на ${b}, и на ${d}:`, answer: L,
+                ok: v => Number.isInteger(v) && v > 0 && v % b === 0 && v % d === 0,
+                hint: `Перебирай числа, кратные ${Math.max(b, d)}: ${Math.max(b, d)}, ${2 * Math.max(b, d)}, ${3 * Math.max(b, d)}… Какое делится и на ${Math.min(b, d)}?` },
+    formOk: p => p.form === 'fraction' && Number.isInteger(p.num) && Number.isInteger(p.den) && gcd(p.num, p.den) > 1
+      ? `Верно! Но дробь можно сократить: ${p.num} и ${p.den} делятся на ${gcd(p.num, p.den)}. Сократи и отправь снова.` : null,
+    diagnose(v) {
+      if (eq(v, wrongDen)) return 'Знаменатели не складывают и не вычитают! Знаменатель — это размер куска. Сначала порежь на одинаковые куски (общий знаменатель), потом считай числители.';
+      if (eq(v, (op === '+' ? a + c : a - c) / L)) return `Общий знаменатель верный, а числители не домножил: ${fr(a, b)} = ${fr(a * m1, L)}, ${fr(c, d)} = ${fr(c * m2, L)}.`;
+      if (eq(v, (op === '+' ? a + c : a - c) / (b * d))) return `Знаменатели перемножил, а числители не домножил: ${fr(a, b)} = ${fr(a * d, b * d)}.`;
+      return `Приведи к общему знаменателю ${L}: ${fr(a, b)} = ${fr(a * m1, L)}, ${fr(c, d)} = ${fr(c * m2, L)}.`;
+    },
+    solution: `<p>Знаменатели разные (${b} и ${d}) — куски разного размера. Режем на одинаковые: общий знаменатель <b>${L}</b>.</p>
+      <p>${fr(a, b)} = ${fr(a * m1, L)} &nbsp; (умножили на ${m1}), &nbsp; ${fr(c, d)} = ${fr(c * m2, L)} &nbsp; (умножили на ${m2})</p>
+      <p>${fr(a * m1, L)} ${op} ${fr(c * m2, L)} = ${fr(num, L)}${g > 1 ? ` = <b>${L / g === 1 ? num / g : fr(num / g, L / g)}</b> (сократили на ${g})` : ''}</p>
+      <p>Ответ: <b>${L / g === 1 ? num / g : `${num / g}/${L / g}`}</b></p>
+      ${bars([barRow(a, b), barRow(c, d, '#2e8b57'), barRow(a * m1, L), barRow(c * m2, L, '#2e8b57'), { n: num, d: L, color: '#c9822b', label: '=' }])}`
+  };
+}
+
+// ---------- equations ----------
+function genEq() {
+  const kind = pick(['root', 'root', 'solve1', 'solve1', 'solve2', 'solve2', 'brk', 'brk', 'dec', 'count', 'fracx']);
+  const r = ri(-5, 9);
+
+  if (kind === 'root' || kind === 'solve2') {
+    let a1, a2;
+    do { a1 = pick([2, 3, 4, 5, 6, -2, -3]); a2 = pick([1, 2, 3, -1, -4]); } while (a1 === a2);
+    const b1 = ri(-9, 9), b2 = (a1 - a2) * r + b1;
+    const L = { x: a1, '': b1 }, R = { x: a2, '': b2 }, e = eqStr(L, R);
+    const lv = v => a1 * v + b1, rv = v => a2 * v + b2;
+    if (kind === 'root') {
+      const t = Math.random() < 0.5 ? r : r + pick([-2, -1, 1, 2]), ans = t === r ? 'да' : 'нет';
+      return {
+        q: `Является ли число ${fmt(t)} корнем уравнения ${e}?`, answer: ans, options: YESNO, same: v => v === ans,
+        scaffolds: [{ label: `Подставь x = ${fmt(t)} в левую часть: ${fmtLinear(L, ['x', ''])} =`, answer: lv(t), hint: `Вместо x пиши ${par(t)}: ${subst(a1, b1, t)}.` },
+                    { label: `Подставь x = ${fmt(t)} в правую часть: ${fmtLinear(R, ['x', ''])} =`, answer: rv(t), hint: `Вместо x пиши ${par(t)}: ${subst(a2, b2, t)}.` }],
+        diagnose: () => `Слева ${fmt(lv(t))}, справа ${fmt(rv(t))}. ${t === r ? 'Равны — значит, корень.' : 'Не равны — значит, не корень.'}`,
+        solution: `<p>Левая часть: ${subst(a1, b1, t)} = ${fmt(lv(t))}. Правая: ${subst(a2, b2, t)} = ${fmt(rv(t))}.</p>
+          <p>${t === r ? 'Равны — число <b>является</b> корнем.' : 'Не равны — число <b>не является</b> корнем.'}</p>${balance(fmt(lv(t)), fmt(rv(t)), t === r, rv(t) > lv(t))}`
+      };
+    }
+    return eqTask(e, r, lv, rv, { a1, b1, a2, b2 });
+  }
+
+  if (kind === 'solve1') {
+    const a = pick([2, 3, 4, 5, 6, 7, 8, 9, -2, -3, -4, -5]), b = pick([ri(-15, -1), ri(1, 15)]), c = a * r + b;
+    const cf = Math.random() < 0.3;
+    const e = `${fmtLinear({ x: a, '': b }, cf ? ['', 'x'] : ['x', ''])} = ${fmt(c)}`;
+    return eqTask(e, r, v => a * v + b, () => c, { a1: a, b1: b, a2: 0, b2: c });
+  }
+
+  if (kind === 'brk') {
+    const k = pick([2, 3, 4, 5, -2, -3]), p = pick([-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5]);
+    let a2; do { a2 = pick([1, 2, 3, -1]); } while (a2 === k);
+    const b2 = k * (r + p) - a2 * r;
+    const e = `${k === -1 ? '−' : fmt(k)}(${fmtLinear({ x: 1, '': p }, ['x', ''])}) = ${fmtLinear({ x: a2, '': b2 }, ['x', ''])}`;
+    const half = (b2 - p) / (k - a2);       // the root if only x got multiplied: kx + p
+    return eqTask(e, r, v => k * (v + p), v => a2 * v + b2, { a1: k, b1: k * p, a2, b2, open: `${fmtLinear({ x: k, '': k * p }, ['x', ''])} = ${fmtLinear({ x: a2, '': b2 }, ['x', ''])}`, half, k, p });
+  }
+
+  if (kind === 'dec') {
+    const k = pick([0.2, 0.4, 0.5, 0.25, 0.3, 0.6, 1.5, 2.5, 0.8]), x = ri(2, 20), m = round6(k * x);
+    return {
+      q: `${fmt(k)}x = ${fmt(m)}. Найди x.`, answer: x,
+      predict: { label: `Прикинь: x больше или меньше, чем ${fmt(m)}?`, options: ['больше', 'меньше'], correct: k < 1 ? 'больше' : 'меньше', ref: m },
+      check: { label: `Проверка: ${fmt(k)} · твой x =`, target: m, compute: v => round6(k * v) },
+      diagnose(v) {
+        if (eq(v, round6(m * k))) return 'Ты умножил. x = частное : множитель — делить надо.';
+        for (const z of [10, 100]) if (eq(v * z, x) || eq(v / z, x)) return 'Цифры верные, запятая не там. Сделай делитель целым: сдвинь запятую в обоих числах.';
+        return `x = ${fmt(m)} : ${fmt(k)}. Сдвинь запятую в обоих числах, чтобы делитель стал целым.`;
+      },
+      solution: `<p>x = ${fmt(m)} : ${fmt(k)} = ${fmt(round6(m * 10 ** decimals(k)))} : ${fmt(round6(k * 10 ** decimals(k)))} = <b>${x}</b></p>
+        <p>${k < 1 ? `Делим на число меньше 1 — x больше ${fmt(m)}.` : `Делим на число больше 1 — x меньше ${fmt(m)}.`} Проверка: ${fmt(k)} · ${x} = ${fmt(m)} ✓</p>`
+    };
+  }
+
+  if (kind === 'count') {
+    const type = pick(['one', 'none', 'inf']), k = pick([2, 3, 4, 5]), p = ri(1, 6);
+    let e, steps, ans;
+    if (type === 'none') {
+      const q = k * p + pick([-3, -1, 2, 4]), right = fmtLinear({ x: k, '': q }, ['x', '']);
+      e = `${k}(x + ${p}) = ${right}`; ans = 'нет корней';
+      steps = `${k}x + ${k * p} = ${right}<br>${k}x − ${k}x = ${fmt(q)} − ${k * p}<br>0 = ${fmt(q - k * p)} — неверно при любом x`;
+    } else if (type === 'inf') {
+      ans = 'бесконечно много';
+      if (Math.random() < 0.5) {
+        e = `${k}(x + ${p}) = ${k}x + ${k * p}`;
+        steps = `${k}x + ${k * p} = ${k}x + ${k * p} &nbsp; <span class="muted">(раскрыли скобки)</span><br>${k}x − ${k}x = ${k * p} − ${k * p}<br>0 = 0 — верно при любом x`;
+      } else {
+        e = `${k}x + ${p} = ${p} + ${k}x`;
+        steps = `${k}x − ${k}x = ${p} − ${p}<br>0 = 0 — верно при любом x`;
+      }
+    } else {
+      const a2 = k + pick([1, 2, -1]);
+      e = `${k}(x + ${p}) = ${termStr(a2, 'x')} + ${p}`; ans = 'один корень';
+      steps = `${k}x + ${k * p} = ${termStr(a2, 'x')} + ${p}<br>${termStr(k - a2, 'x')} = ${fmt(p - k * p)}<br>x = ${fmt(p - k * p)} : ${par(k - a2)} — одно число, один корень`;
+    }
+    return {
+      q: `Сколько корней у уравнения ${e}?`, answer: ans, options: ['один корень', 'нет корней', 'бесконечно много'], same: v => v === ans,
+      diagnose: () => 'Раскрой скобки и перенеси иксы влево. Если иксы исчезли: осталось верное равенство (0 = 0) — бесконечно много корней; неверное (0 = 5) — нет корней.',
+      solution: `<p>${steps}</p><p>Ответ: <b>${ans}</b>.</p>`
+    };
+  }
+
+  // x/a + x/b = c
+  let a, b; do { a = pick([2, 3, 4, 5, 6]); b = pick([2, 3, 4, 5, 6]); } while (a === b || a % b === 0 || b % a === 0);
+  const L = lcm(a, b), x = L * ri(1, 4), c = x / a + x / b, cn = L / a + L / b;
+  return {
+    q: `${fr('x', a)} + ${fr('x', b)} = ${c}. Найди x.`, answer: x,
+    scaffold: { label: `Сложи дроби: ${fr('x', a)} + ${fr('x', b)} = (?) · x. Впиши дробь:`, answer: cn / L,
+                hint: `Как ${fr(1, a)} + ${fr(1, b)}: общий знаменатель ${L}. Знаменатели не складывают!` },
+    check: { label: `Проверка: подставь свой x: ${fr('x', a)} + ${fr('x', b)} =`, target: c, compute: v => round6(v / a + v / b) },
+    diagnose(v) {
+      if (eq(v, c * (a + b)) || eq(v, c / (a + b))) return `${fr('x', a)} + ${fr('x', b)} — это не ${fr('x', a + b)}. Знаменатели не складывают: приведи к общему знаменателю ${L}.`;
+      return `${fr('x', a)} + ${fr('x', b)} = ${fr(cn + 'x', L)}. Реши ${fr(cn + 'x', L)} = ${c}.`;
+    },
+    solution: `<p>${fr('x', a)} + ${fr('x', b)} = ${fr((L / a) + 'x', L)} + ${fr((L / b) + 'x', L)} = ${fr(cn + 'x', L)}</p>
+      <p>${fr(cn + 'x', L)} = ${c} → ${cn}x = ${c * L} → x = <b>${x}</b></p>
+      <p>Проверка: ${x} : ${a} + ${x} : ${b} = ${x / a} + ${x / b} = ${c} ✓</p>`
+  };
+}
+// One-unknown linear equation with a two-sided check.
+function eqTask(e, r, lv, rv, { a1, b1, a2, b2, open, half, k, p }) {
+  const A = a1 - a2, B = b2 - b1;
+  const lhs = a2 ? `${termStr(a1, 'x')} ${a2 < 0 ? '+' : '−'} ${termStr(Math.abs(a2), 'x')}` : termStr(a1, 'x');
+  const rhsS = b1 ? `${fmt(b2)} ${b1 < 0 ? '+' : '−'} ${fmt(Math.abs(b1))}` : fmt(b2);
+  return {
+    q: `Реши уравнение: ${e}`, answer: r,
+    check: { label: 'Проверка: подставь свой x в <b>левую</b> часть. Получилось:', compute: v => round6(lv(v)), targetOf: v => round6(rv(v)) },
+    diagnose(v) {
+      if (half !== undefined && eq(v, half)) return `Скобку раскрыл не до конца: ${k} умножается и на x, и на ${fmt(p)}.`;
+      if (eq(v, -r)) return 'Число верное, а знак — нет. Проверь перенос: перешёл через «=» — поменял знак.';
+      if (eq(v, (b2 + b1) / A)) return `Перенося ${fmt(b1)} вправо, забыл поменять знак.`;
+      if (A !== 0 && eq(v, A / B)) return `Наоборот: x = ${fmt(B)} : ${par(A)} — делим число на коэффициент при x.`;
+      return 'Иксы — влево, числа — вправо, при переносе меняй знак. Потом раздели на число при x. И проверь подстановкой.';
+    },
+    solution: `<p>${e}</p>${open ? `<p>${open} &nbsp; <span class="muted">(раскрыли скобки)</span></p>` : ''}
+      ${a2 ? `<p>${lhs} = ${rhsS} &nbsp; <span class="muted">(иксы влево, числа вправо, знаки поменяли)</span></p>`
+           : b1 ? `<p>${lhs} = ${rhsS} &nbsp; <span class="muted">(число перенесли вправо, знак поменяли)</span></p>` : ''}
+      <p>${termStr(A, 'x')} = ${fmt(B)}</p><p>x = ${fmt(B)} : ${par(A)} = <b>${fmt(r)}</b></p>
+      <p>Проверка: слева ${fmt(lv(r))}, справа ${fmt(rv(r))} ✓</p>`
+  };
+}
+
+// ---------- word problems -> equation ----------
+function genEqWord() {
+  const kind = pick(['diff', 'diff', 'times', 'price']);
+  let text, askBig, check;
+  if (kind === 'diff') {
+    const d = ri(2, 15), x = ri(5, 40), S = 2 * x + d;
+    const T = pick([
+      { text: `В двух корзинах ${S} ${pl(S, 'яблоко', 'яблока', 'яблок')}. В первой корзине на ${d} ${pl(d, 'яблоко', 'яблока', 'яблок')} больше, чем во второй.`,
+        askS: 'Сколько яблок во второй корзине?', askB: 'Сколько яблок в первой корзине?', xIs: 'число яблок во второй корзине',
+        otherQ: 'Сколько тогда яблок в первой корзине?', sN: 'вторая', bN: 'первая', bigLbl: 'в первой корзине' },
+      { text: `В классе ${S} ${pl(S, 'ученик', 'ученика', 'учеников')}. Девочек на ${d} больше, чем мальчиков.`,
+        askS: 'Сколько в классе мальчиков?', askB: 'Сколько в классе девочек?', xIs: 'число мальчиков',
+        otherQ: 'Сколько тогда девочек?', sN: 'мальчики', bN: 'девочки', bigLbl: 'девочек' },
+      { text: `На двух полках ${S} ${pl(S, 'книга', 'книги', 'книг')}. На первой полке на ${d} ${pl(d, 'книгу', 'книги', 'книг')} больше, чем на второй.`,
+        askS: 'Сколько книг на второй полке?', askB: 'Сколько книг на первой полке?', xIs: 'число книг на второй полке',
+        otherQ: 'Сколько тогда книг на первой полке?', sN: 'вторая', bN: 'первая', bigLbl: 'на первой полке' },
+      { text: `У Пети и Коли вместе ${S} ${pl(S, 'марка', 'марки', 'марок')}. У Пети на ${d} ${pl(d, 'марку', 'марки', 'марок')} больше, чем у Коли.`,
+        askS: 'Сколько марок у Коли?', askB: 'Сколько марок у Пети?', xIs: 'число марок у Коли',
+        otherQ: 'Сколько тогда марок у Пети?', sN: 'Коля', bN: 'Петя', bigLbl: 'у Пети' }]);
+    askBig = Math.random() < 0.3;
+    const answer = askBig ? x + d : x;
+    check = { label: 'Проверка: найди вторую величину по своему ответу и сложи обе. Получилось:', target: S, compute: v => askBig ? v + (v - d) : v + (v + d) };
+    return wordTask(`${T.text} ${askBig ? T.askB : T.askS}`, T.xIs, `${T.otherQ} Запиши через x:`, { x: 1, '': d }, { x: 2, '': d - S }, answer, check,
+      modelBars([{ name: T.sN, segs: [['x', 25]] }, { name: T.bN, segs: [['x', 25], [`${d}`, 10, '#fdf3e4']] }], `всего ${S}`),
+      [`Пусть x — ${T.xIs}. Тогда ${T.bigLbl}: x + ${d}.`, `Вместе: x + (x + ${d}) = ${S}`, `2x + ${d} = ${S} → 2x = ${S - d} → x = ${x}`,
+       askBig ? `${T.bigLbl[0].toUpperCase() + T.bigLbl.slice(1)}: ${x} + ${d} = <b>${x + d}</b>` : `Ответ: <b>${x}</b>`, `Проверка: ${x} + ${x + d} = ${S} ✓`],
+      v => eq(v, S / 2) ? `Поровну делить нельзя — разница ${d}.` : askBig && eq(v, x) ? `Ты нашёл меньшее число. А спрашивают большее — прибавь ${d}.`
+        : !askBig && eq(v, x + d) ? 'Ты нашёл большее число. А спрашивают меньшее.' : null);
+  }
+  if (kind === 'times') {
+    const k = ri(2, 5), x = ri(3, 20), S = (k + 1) * x, inK = `в ${k} ${pl(k, 'раз', 'раза', 'раз')}`;
+    const tape = Math.random() < 0.5;
+    const text = tape ? `Ленту длиной ${S} см разрезали на две части. Одна часть ${inK} длиннее другой. Какой длины короткая часть?`
+      : `Брат и сестра вместе собрали ${S} ${pl(S, 'гриб', 'гриба', 'грибов')}. Брат собрал ${inK} больше, чем сестра. Сколько грибов собрала сестра?`;
+    const sm = tape ? 'короткая' : 'сестра', bg = tape ? 'длинная' : 'брат';
+    check = { label: 'Проверка: найди вторую величину и сложи обе. Получилось:', target: S, compute: v => v + k * v };
+    return wordTask(text, tape ? 'длина короткой части' : 'сколько грибов собрала сестра', `${tape ? 'Какой длины тогда длинная часть?' : 'Сколько тогда собрал брат?'} Запиши через x:`,
+      { x: k }, { x: k + 1, '': -S }, x, check,
+      modelBars([{ name: sm, segs: [['x', 12]] }, { name: bg, segs: Array.from({ length: k }, () => ['x', 12]) }], `всего ${S}`),
+      [`Пусть x — ${tape ? 'длина короткой части' : 'грибы сестры'}. Тогда ${tape ? 'длинная часть' : 'у брата'}: ${k}x («${inK} больше» — умножаем).`, `x + ${k}x = ${S}`,
+       `${k + 1}x = ${S} → x = <b>${x}</b>`, `Проверка: ${x} + ${k * x} = ${S} ✓`],
+      v => eq(v, (S - k) / 2) ? `«${inK[0].toUpperCase() + inK.slice(1)} больше» — это умножение на ${k}, а не «на ${k} больше». Вторая величина — ${k}x, а не x + ${k}.`
+        : eq(v, S / 2) ? 'Поровну делить нельзя.' : null);
+  }
+  const a = ri(2, 4), b = ri(2, 4), d = pick([5, 10, 15, 20]), x = pick([10, 15, 20, 25, 30, 40]), S = a * x + b * (x + d);
+  askBig = Math.random() < 0.3;
+  text = `Купили ${a} ручки и ${b} тетради и заплатили ${S} руб. Тетрадь на ${d} руб. дороже ручки. Сколько стоит ${askBig ? 'тетрадь' : 'ручка'}?`;
+  check = { label: 'Проверка: посчитай всю покупку по своим ценам. Получилось:', target: S, compute: v => askBig ? a * (v - d) + b * v : a * v + b * (v + d) };
+  return wordTask(text, 'цена ручки', 'Сколько тогда стоит тетрадь? Запиши через x:', { x: 1, '': d }, { x: a + b, '': b * d - S }, askBig ? x + d : x, check, '',
+    [`Пусть ручка стоит x руб. Тетрадь: x + ${d}.`, `${a}x + ${b}(x + ${d}) = ${S} &nbsp; <span class="muted">(скобка: дороже каждая тетрадь)</span>`,
+     `${a}x + ${b}x + ${b * d} = ${S} → ${a + b}x = ${S - b * d} → x = ${x}`, askBig ? `Тетрадь: ${x} + ${d} = <b>${x + d}</b> руб.` : `Ручка: <b>${x}</b> руб.`,
+     `Проверка: ${a} · ${x} + ${b} · ${x + d} = ${S} ✓`],
+    v => eq(v, (S - d) / (a + b)) ? `${b} тетради дороже на ${b} · ${d}, а не на ${d}: нужна скобка ${b}(x + ${d}).` : askBig && eq(v, x) ? `Это цена ручки. А спрашивают тетрадь — прибавь ${d}.` : null);
+}
+function wordTask(text, xIs, otherLabel, other, target, answer, check, model, lines, special) {
+  return {
+    q: text, answer,
+    scaffolds: [
+      { label: `Пусть x — ${xIs}. ${otherLabel}`, parse: parseExpr, same: v => sameLinear(v, other), wide: true,
+        inputHint: 'Запиши через x, например x + 5 или 3x.', hint: 'Перечитай условие: «на … больше» — прибавить, «в … раз больше» — умножить.' },
+      { label: 'Составь уравнение (с x и знаком «=»):', parse: parseEq, same: v => sameEquation(v, target), reject: notSolved, wide: true,
+        inputHint: 'Уравнение — с x и знаком «=», например x + (x + 5) = 30. Скобки можно.', hint: 'Найди в условии «вместе», «всего», «заплатили» — это и есть «=». Слева — сумма того, что ты выразил через x.' }],
+    check,
+    diagnose(v) { return special(v) || 'Реши своё уравнение и сделай проверку по условию задачи.'; },
+    solution: lines.map(l => `<p>${l}</p>`).join('') + model
   };
 }
 
@@ -744,43 +1112,212 @@ function genInterval() {
 // ---------- modules ----------
 const MODULES = [
   { id: 'neg', title: 'Сложение и вычитание отрицательных', short: 'Отрицательные', gen: genNeg,
-    theory: `<ul>
-      <li><b>Числовая прямая.</b> Прибавить положительное — шаг вправо. Прибавить отрицательное — шаг влево.</li>
-      <li><b>Вычесть — значит прибавить противоположное:</b> 5 − (−3) = 5 + 3; &nbsp; −3 − 5 = −3 + (−5).</li>
-      <li><b>Сначала знак, потом число.</b> Знаки одинаковые — модули складываем, знак общий. Разные — из большего модуля вычитаем меньший, знак у того, чей модуль больше.</li>
-      <li><b>Деньги:</b> −8 — это долг 8 руб. Добавили ещё долг 5 руб. — долг 13: −8 + (−5) = −13.</li></ul>`,
+    lesson: {
+      hook: 'Отрицательное число — это долг или шаг <b>влево</b> по числовой прямой. Нарисуем — и правило станет видно само.',
+      examples: [
+        { title: 'разбираем вместе', problem: '−8 + (−5) = ?', steps: [
+          { math: 'Старт: −8.', why: 'Ты должен 8 рублей. На прямой это точка −8 — левее нуля.' },
+          { think: true, math: '+ (−5) — это ещё долг 5 рублей.', why: 'Прибавить отрицательное число — шаг <b>влево</b>.', pic: numberLine(-8, -13, '−5') },
+          { math: '−8 + (−5) = −13', why: 'Долг вырос: 8 + 5 = 13, и это по-прежнему долг. <b>Знаки одинаковые — модули складываем, знак тот же.</b>' }] },
+        { title: 'минус и минус', problem: '−3 − (−7) = ?', steps: [
+          { think: true, math: '−3 − (−7) = −3 + 7', why: '<b>Вычесть число — значит прибавить противоположное.</b> Минус перед скобкой «съедает» минус в скобке: −(−7) = +7.' },
+          { math: 'Шаг вправо на 7', why: 'Прибавить положительное — шаг вправо.', pic: numberLine(-3, 4, '+7') },
+          { math: '−3 + 7 = 4', why: '<b>Знаки разные — из большего модуля вычитаем меньший:</b> 7 − 3 = 4. Знак у того, кто больше по модулю: у +7, значит плюс.' }] },
+        { title: 'твоя очередь', problem: '5 − 9 = ?', steps: [
+          { try: { label: 'Перепиши вычитание сложением: 5 − 9 = 5 + (…). Что в скобках?', answer: -9, hint: 'Вычесть 9 — значит прибавить противоположное число. Противоположное к 9 — это −9.' },
+            math: '5 − 9 = 5 + (−9)' },
+          { try: { label: 'Ответ: 5 + (−9) =', answer: -4, hint: 'От 5 шагаем влево на 9: до нуля 5 шагов, и ещё 4 шага за нулём.' },
+            math: '5 + (−9) = −4', why: 'Знаки разные: 9 − 5 = 4, знак у −9.', pic: numberLine(5, -4, '−9') }] },
+        { title: 'твоя очередь', problem: '−6 − (−10) = ?', steps: [
+          { try: { label: 'Убери «минус минус»: −6 − (−10) = −6 + …', answer: 10, hint: '−(−10) = +10.' }, math: '−6 − (−10) = −6 + 10' },
+          { try: { label: 'Ответ: −6 + 10 =', answer: 4, hint: 'Знаки разные: 10 − 6, знак у 10.' }, math: '−6 + 10 = 4', pic: numberLine(-6, 4, '+10') }] }],
+      rule: `<ul><li>Прибавить положительное — шаг вправо, отрицательное — шаг влево.</li>
+        <li><b>Вычесть — значит прибавить противоположное:</b> 5 − (−3) = 5 + 3; &nbsp; −3 − 5 = −3 + (−5).</li>
+        <li>Знаки одинаковые — модули складываем, знак тот же. Разные — из большего модуля вычитаем меньший, знак у того, чей модуль больше.</li>
+        <li>Не уверен — нарисуй прямую.</li></ul>` },
     oops: [['−8 + (−5) = 13', 'Долг плюс долг — это долг, а не прибыль. Модули сложены верно, но знак должен быть минус: <b>−13</b>.'],
            ['−3 − (−7) = −4', 'Вычесть −7 — значит прибавить 7: −3 + 7 = <b>4</b>. Минус перед скобкой «съедает» минус в скобке.']] },
   { id: 'brk', title: 'Минус перед скобкой', short: 'Минус-скобка', gen: genBracket,
-    theory: `<ul>
-      <li><b>Минус — это умножение на −1.</b> −5 = (−1) · 5, &nbsp; −a = (−1) · a. И перед скобкой так же:<br>
-        <b>−(a + 4b − 4) = (−1) · (a + 4b − 4).</b></li>
-      <li><b>−1 умножается на каждое слагаемое в скобке</b> — как 3 · (a + b) = 3a + 3b:<br>
-        (−1) · a = −a, &nbsp; (−1) · 4b = −4b, &nbsp; (−1) · (−4) = +4. &nbsp; Итого: <b>−a − 4b + 4</b>.</li>
-      <li><b>Короче:</b> убираем скобку вместе с минусом перед ней — у <b>каждого</b> слагаемого знак меняется на противоположный.</li>
-      <li><b>То же в числах:</b> 10 − (3 + 2) = 10 − 5 = 5 и 10 − 3 − 2 = 5. Вычесть сумму — значит вычесть каждое слагаемое.</li>
-      <li><b>Проверка числами:</b> подставь, например, a = 1, b = 2 в выражение до и после. Числа должны совпасть.</li>
-      <li>Перед скобкой плюс — это умножение на +1, знаки не меняются: +(a − 3) = a − 3.</li></ul>`,
+    lesson: {
+      hook: 'Минус перед скобкой — это на самом деле <b>умножение на −1</b>. Поймёшь это — и раскрывать скобки станет просто.',
+      examples: [
+        { title: 'сначала в числах', problem: '10 − (3 + 2) = ?', steps: [
+          { math: '10 − (3 + 2) = 10 − 5 = 5', why: 'Сначала считаем скобку, как обычно.' },
+          { think: true, math: '10 − 3 − 2 = 5', why: 'Тот же ответ! <b>Вычесть сумму — значит вычесть каждое слагаемое.</b> Скобку можно убрать, если поменять знак у каждого числа в ней.' }] },
+        { title: 'разбираем вместе', problem: '−(a + 4b − 4) = ?', steps: [
+          { math: '−5 = (−1) · 5, &nbsp; −a = (−1) · a', why: 'Минус перед числом или буквой — это умножение на −1.' },
+          { think: true, math: '−(a + 4b − 4) = (−1) · (a + 4b − 4)', why: 'Значит, и минус перед скобкой — это умножение <b>всей</b> скобки на −1.' },
+          { math: '(−1) · a = −a', why: 'Умножаем −1 на <b>каждое</b> слагаемое по очереди — как 3 · (a + b) = 3a + 3b.' },
+          { math: '(−1) · 4b = −4b', why: 'Второе слагаемое.' },
+          { think: true, math: '(−1) · (−4) = +4', why: 'Третье слагаемое. Минус на минус — плюс.' },
+          { math: 'Итог: −a − 4b + 4', why: 'У <b>каждого</b> слагаемого знак сменился на противоположный: плюс стал минусом, минус — плюсом.' },
+          { math: 'Проверка при a = 1, b = 2:<br>−(1 + 8 − 4) = −5 &nbsp; и &nbsp; −1 − 8 + 4 = −5 ✓', why: 'Подставили одни и те же числа до и после — совпало. Так можно проверить любое раскрытие скобок.' }] },
+        { title: 'твоя очередь', problem: '−(x − 3) = ?', steps: [
+          { try: { label: '(−1) · x =', parse: parseLinear, same: v => sameLinear(v, { x: -1 }), inputHint: 'Запиши выражение, например −x.', hint: '−1 умножить на x — это −x.' },
+            math: '(−1) · x = −x' },
+          { try: { label: '(−1) · (−3) =', answer: 3, hint: 'Минус на минус — плюс.' }, math: '(−1) · (−3) = +3' },
+          { try: { label: 'Собери ответ без скобок: −(x − 3) =', parse: parseLinear, same: v => sameLinear(v, { x: -1, '': 3 }), wide: true,
+                   inputHint: 'Запиши выражение без скобок, например −x + 5.', hint: 'Сложи то, что получилось: −x и +3.' },
+            math: '−(x − 3) = −x + 3' }] },
+        { title: 'как в школьных примерах', problem: '7 − (2x − 3) + 4x = ?', steps: [
+          { think: true, math: '7 − 2x + 3 + 4x', why: 'Раскрыли скобку: внутри знаки поменялись (2x → −2x, −3 → +3). То, что вне скобки, не трогаем.' },
+          { think: true, math: '(−2x + 4x) + (7 + 3) = 2x + 10', why: 'Собрали подобные: иксы с иксами, числа с числами.' },
+          { math: 'Проверка при x = 1:<br>7 − (2 − 3) + 4 = 12 &nbsp; и &nbsp; 2 + 10 = 12 ✓' }] }],
+      rule: `<ul><li><b>Минус перед скобкой — умножение на −1.</b> −1 умножается на каждое слагаемое.</li>
+        <li>Короче: убираешь скобку с минусом перед ней — меняешь знак у <b>каждого</b> слагаемого в ней.</li>
+        <li>Плюс перед скобкой — знаки не меняются: +(a − 3) = a − 3.</li>
+        <li>Проверка: подставь одни и те же числа до и после — должно совпасть.</li></ul>` },
     oops: [['−(a + 4b − 4) = −a + 4b − 4', 'Знак поменялся только у a. А −1 умножается на всё в скобке: (−1) · 4b = −4b, (−1) · (−4) = +4. Правильно: <b>−a − 4b + 4</b>. Проверка при a = 1, b = 2: −(1 + 8 − 4) = −5, у Пети −1 + 8 − 4 = 3 — не совпало.'],
            ['7 − (x − 3) = 7 − x − 3', '−(x − 3) = (−1) · x + (−1) · (−3) = −x + 3. Значит 7 − x + 3 = <b>10 − x</b>. Проверка при x = 1: 7 − (1 − 3) = 9, и 10 − 1 = 9 ✓.']] },
+  { id: 'frac', title: 'Сложение и вычитание дробей', short: 'Дроби', gen: genFrac,
+    lesson: {
+      hook: `Половинка пиццы и треть пиццы — сколько это вместе? Многие отвечают ${fr(2, 5)}. Сейчас увидим, почему это неверно и как правильно.`,
+      examples: [
+        { title: 'разбираем вместе', problem: `${fr(1, 2)} + ${fr(1, 3)} = ?`, steps: [
+          { math: `${fr(1, 2)} — половина, ${fr(1, 3)} — треть.`, why: '<b>Знаменатель</b> — на сколько кусков разрезали целое. <b>Числитель</b> — сколько кусков взяли.',
+            pic: bars([barRow(1, 2), barRow(1, 3, '#2e8b57')]) },
+          { think: true, math: `Ловушка: ${fr(1, 2)} + ${fr(1, 3)} ≠ ${fr(2, 5)}`, why: `Посмотри: ${fr(2, 5)} <b>меньше</b> половины. А мы к половине <b>прибавили</b> кусок — должно стать больше половины. Прикидка сразу ловит эту ошибку.`,
+            pic: bars([barRow(1, 2), { n: 2, d: 5, color: '#c0392b', label: '2/5 ?' }]) },
+          { think: true, math: 'Режем на одинаковые куски — на 6.', why: '6 делится и на 2, и на 3. Такое число называют <b>общим знаменателем</b>.' },
+          { math: `${fr(1, 2)} = ${fr(3, 6)}, &nbsp; ${fr(1, 3)} = ${fr(2, 6)}`, why: 'Половина — это 3 куска из 6. Треть — 2 куска из 6. Числитель и знаменатель умножили на одно число — дробь не изменилась.',
+            pic: bars([barRow(3, 6), barRow(2, 6, '#2e8b57')]) },
+          { math: `${fr(3, 6)} + ${fr(2, 6)} = ${fr(5, 6)}`, why: 'Куски теперь одинаковые — считаем, сколько их: 3 + 2 = 5. <b>Знаменатель не меняется</b>: размер куска тот же.',
+            pic: bars([{ n: 5, d: 6, color: '#c9822b', label: '5/6' }]) },
+          { math: `Прикидка: ${fr(5, 6)} больше ${fr(1, 2)} ✓`, why: 'При сложении ответ больше каждой из дробей — так и вышло.' }] },
+        { title: 'твоя очередь', problem: `${fr(2, 3)} + ${fr(1, 4)} = ?`, steps: [
+          { try: { label: 'Общий знаменатель — самое маленькое число, которое делится и на 3, и на 4:', answer: 12, hint: 'Перебирай числа, кратные 4: 4, 8, 12… Какое делится на 3?' },
+            math: 'Общий знаменатель — 12.' },
+          { try: { label: `${fr(2, 3)} = ?/12. Сколько двенадцатых?`, answer: 8, hint: '3 · 4 = 12 — знаменатель умножили на 4. Числитель тоже умножь на 4: 2 · 4.' },
+            math: `${fr(2, 3)} = ${fr(8, 12)}` },
+          { try: { label: `${fr(1, 4)} = ?/12`, answer: 3, hint: '4 · 3 = 12 — числитель тоже умножь на 3.' }, math: `${fr(1, 4)} = ${fr(3, 12)}` },
+          { try: { label: `${fr(8, 12)} + ${fr(3, 12)} = ?/12`, answer: 11, hint: 'Складываем только числители: 8 + 3. Знаменатель 12 остаётся.' },
+            math: `${fr(8, 12)} + ${fr(3, 12)} = ${fr(11, 12)}`, pic: bars([{ n: 11, d: 12, color: '#c9822b', label: '11/12' }]) },
+          { math: `Прикидка: ${fr(11, 12)} больше ${fr(2, 3)} ✓` }] },
+        { title: 'вычитание', problem: `${fr(3, 4)} − ${fr(1, 6)} = ?`, steps: [
+          { math: 'Общий знаменатель — 12.', why: '12 делится и на 4, и на 6. (24 тоже подошло бы, но с маленьким числом считать легче.)' },
+          { math: `${fr(3, 4)} = ${fr(9, 12)}, &nbsp; ${fr(1, 6)} = ${fr(2, 12)}`, why: '3 · 3 = 9 (знаменатель 4 умножили на 3); 1 · 2 = 2 (знаменатель 6 умножили на 2).' },
+          { try: { label: `${fr(9, 12)} − ${fr(2, 12)} = ?/12`, answer: 7, hint: 'Из 9 кусков убрали 2.' }, math: `${fr(9, 12)} − ${fr(2, 12)} = ${fr(7, 12)}` },
+          { math: `Прикидка: ${fr(7, 12)} меньше ${fr(3, 4)} ✓`, why: 'Вычли — стало меньше.' }] },
+        { title: 'с буквой — пригодится в уравнениях', problem: `${fr('x', 2)} + ${fr('x', 3)} = ?`, steps: [
+          { think: true, math: `${fr('x', 2)} = ${fr('3x', 6)}, &nbsp; ${fr('x', 3)} = ${fr('2x', 6)}`, why: 'Всё то же самое: общий знаменатель 6.' },
+          { math: `${fr('3x', 6)} + ${fr('2x', 6)} = ${fr('5x', 6)}`, why: `А не ${fr('x', 5)}! Знаменатели не складывают <b>никогда</b> — ни с буквами, ни без.` }] }],
+      rule: `<ul><li>Знаменатель — размер куска. <b>Складывать можно только одинаковые куски.</b></li>
+        <li>Разные знаменатели → найди общий (делится на оба) → домножь числители → складывай числители, знаменатель оставь.</li>
+        <li><b>Знаменатели никогда не складывают.</b></li>
+        <li>Прикидка: сумма больше каждой дроби, разность меньше уменьшаемого.</li>
+        <li>Ответ сократи, если можно: ${fr(6, 8)} = ${fr(3, 4)}.</li></ul>` },
+    oops: [[`${fr(1, 2)} + ${fr(1, 3)} = ${fr(2, 5)}`, `Сложили знаменатели. ${fr(2, 5)} меньше половины — а к половине прибавили. Правильно: ${fr(3, 6)} + ${fr(2, 6)} = <b>${fr(5, 6)}</b>.`],
+           [`${fr('x', 2)} + ${fr('x', 3)} = 10, значит ${fr('x', 5)} = 10`, `${fr('x', 2)} + ${fr('x', 3)} = ${fr('5x', 6)}. Уравнение ${fr('5x', 6)} = 10 → 5x = 60 → x = <b>12</b>. Проверка: 12 : 2 + 12 : 3 = 6 + 4 = 10 ✓`]] },
+  { id: 'eq', title: 'Уравнения: корень и решение', short: 'Уравнения', gen: genEq,
+    lesson: {
+      hook: 'Уравнение — загадка: какое число спрятано за x? Главное умение тут — не решать, а <b>проверять</b>. Проверить можно всегда, даже если забыл, как решать.',
+      examples: [
+        { title: 'что такое корень', problem: 'Является ли число 3 корнем уравнения 2x − 1 = x + 2?', steps: [
+          { math: '<b>Корень</b> — число, при котором равенство становится верным.', why: 'Чтобы проверить, подставь число вместо x в <b>обе</b> части и посчитай.' },
+          { math: 'Левая часть: 2 · 3 − 1 = 5', why: 'Вместо x пишем 3.' },
+          { math: 'Правая часть: 3 + 2 = 5', why: 'Сюда тоже подставляем 3 — то же самое число.' },
+          { math: '5 = 5 — верно. Значит, 3 — корень ✓', why: 'Как весы в равновесии: на обеих чашах одинаково.', pic: balance('2 · 3 − 1 = 5', '3 + 2 = 5', true) }] },
+        { title: 'твоя очередь', problem: 'А число 0 — корень того же уравнения 2x − 1 = x + 2?', steps: [
+          { try: { label: 'Левая часть: 2 · 0 − 1 =', answer: -1, hint: 'Сначала умножение: 2 · 0 = 0. Потом 0 − 1.' }, math: 'Левая часть: 2 · 0 − 1 = −1' },
+          { try: { label: 'Правая часть: 0 + 2 =', answer: 2, hint: 'Просто 0 + 2.' }, math: 'Правая часть: 0 + 2 = 2' },
+          { math: '−1 ≠ 2 — неверно. Значит, 0 — <b>не</b> корень.', why: 'Части не равны — весы перекосило.', pic: balance('−1', '2', false) }] },
+        { title: 'решаем', problem: '5x − 8 = 2x + 7', steps: [
+          { math: 'Цель: x один с одной стороны.', why: 'Иксы соберём слева, числа — справа.', pic: balance('5x − 8', '2x + 7', true) },
+          { think: true, math: '5x − 2x = 7 + 8', why: '2x перешёл влево и стал −2x. −8 перешёл вправо и стал +8. <b>Перенёс через «=» — поменяй знак.</b> Это как на весах: убрали с обеих чаш по 2x — равновесие осталось.' },
+          { math: '3x = 15', why: '5x − 2x = 3x; &nbsp; 7 + 8 = 15.' },
+          { think: true, math: 'x = 15 : 3 = 5', why: '3x — это 3 · x. Неизвестный множитель: делим произведение на известный множитель.' },
+          { math: 'Проверка: 5 · 5 − 8 = 17 &nbsp; и &nbsp; 2 · 5 + 7 = 17 ✓', why: 'Подставили в обе части — равны. Теперь мы <b>знаем</b>, что ответ верный, а не надеемся.' }] },
+        { title: 'твоя очередь', problem: '4x + 7 = 19', steps: [
+          { try: { label: '+7 переносим вправо, знак меняется: 4x = 19 − 7 =', answer: 12, hint: '19 − 7 = 12.' }, math: '4x = 19 − 7 = 12' },
+          { try: { label: 'x = 12 : 4 =', answer: 3, hint: '12 : 4.' }, math: 'x = 12 : 4 = 3' },
+          { try: { label: 'Проверка: 4 · 3 + 7 =', answer: 19, hint: '4 · 3 = 12, и плюс 7.' }, math: 'Проверка: 4 · 3 + 7 = 19 ✓', why: 'Получилось 19, как справа. Корень x = 3.' }] },
+        { title: 'скобки', problem: '3(x − 2) = x + 4', steps: [
+          { think: true, math: '3x − 6 = x + 4', why: 'Сначала раскрываем скобку: 3 умножаем <b>на каждое</b> слагаемое — 3 · x и 3 · 2.' },
+          { math: '3x − x = 4 + 6 &nbsp; → &nbsp; 2x = 10 &nbsp; → &nbsp; x = 5', why: 'Дальше как обычно: перенос со сменой знака и деление.' },
+          { math: 'Проверка: 3 · (5 − 2) = 9 &nbsp; и &nbsp; 5 + 4 = 9 ✓' }] },
+        { title: 'сколько корней', problem: '2x + 1 = 2x + 5', steps: [
+          { math: '2x − 2x = 5 − 1', why: 'Переносим как обычно.' },
+          { think: true, math: '0 · x = 4, то есть 0 = 4', why: 'Иксы пропали! 0 = 4 — неверно, и никакой x этого не исправит.' },
+          { math: 'Корней нет.', why: 'А если бы получилось 0 = 0 — верно при любом x, и корней <b>бесконечно много</b>. Например, 2(x + 1) = 2x + 2.' }] }],
+      rule: `<ul><li><b>Корень</b> — число, при котором равенство верное. Проверка — подставить в обе части.</li>
+        <li>Сначала раскрой скобки. Иксы — влево, числа — вправо. <b>Перенёс через «=» — поменяй знак.</b></li>
+        <li>ax = b → x = b : a.</li>
+        <li>Иксы исчезли: 0 = 0 — бесконечно много корней; 0 = 4 — корней нет.</li>
+        <li><b>Всегда делай проверку</b> — она ловит любую ошибку.</li></ul>` },
+    oops: [['4x + 7 = 19, x = 0,5', 'Проверка: 4 · 0,5 + 7 = 9, а не 19 — значит, неверно. Правильно: 4x = 12, x = <b>3</b>.'],
+           ['0,4x = 2, x = 0,05', 'Прикидка: 0,4 меньше 1, значит x <b>больше</b> 2. Делим: 2 : 0,4 = 20 : 4 = <b>5</b>. Проверка: 0,4 · 5 = 2 ✓'],
+           ['3(x − 2) = x + 4 → 3x − 2 = x + 4', 'Скобку раскрыли не до конца: 3 умножается и на x, и на 2 — получается 3x − 6. Тогда 2x = 10, x = <b>5</b>.']] },
+  { id: 'eqw', title: 'Задачи на уравнения', short: 'Задачи', gen: genEqWord,
+    lesson: {
+      hook: 'Как превратить задачу в уравнение? Есть рецепт из трёх шагов: <b>1)</b> что обозначить за x; <b>2)</b> остальное выразить через x; <b>3)</b> найти в условии «равно».',
+      examples: [
+        { title: 'разбираем вместе', problem: 'В двух корзинах 46 яблок. В первой на 8 яблок больше, чем во второй. Сколько яблок во второй корзине?', steps: [
+          { math: 'Шаг 1. Пусть во второй корзине x яблок.', why: 'За x берём то, про что спрашивают.' },
+          { think: true, math: 'Шаг 2. Тогда в первой x + 8.', why: '«На 8 больше» — прибавляем 8.',
+            pic: modelBars([{ name: 'вторая', segs: [['x', 25]] }, { name: 'первая', segs: [['x', 25], ['8', 10, '#fdf3e4']] }], 'всего 46') },
+          { think: true, math: 'Шаг 3. x + (x + 8) = 46', why: '«В двух корзинах 46» — вот оно, «равно»: обе корзины вместе = 46.' },
+          { math: '2x + 8 = 46 &nbsp; → &nbsp; 2x = 38 &nbsp; → &nbsp; x = 19', why: 'Решаем, как обычное уравнение.' },
+          { math: 'Ответ: 19 яблок. Проверка: в первой 19 + 8 = 27; &nbsp; 19 + 27 = 46 ✓', why: 'Проверяем <b>по условию задачи</b>, а не по уравнению: так ловится и ошибка в самом уравнении.' }] },
+        { title: 'твоя очередь', problem: 'В классе 30 учеников. Девочек на 4 больше, чем мальчиков. Сколько мальчиков?', steps: [
+          { math: 'Шаг 1. Пусть мальчиков x.' },
+          { try: { label: 'Шаг 2. Сколько девочек? Запиши через x:', parse: parseExpr, same: v => sameLinear(v, { x: 1, '': 4 }), wide: true,
+                   inputHint: 'Запиши через x, например x + 3.', hint: 'Девочек «на 4 больше», чем мальчиков — к x прибавь 4.' }, math: 'Девочек: x + 4.' },
+          { try: { label: 'Шаг 3. Составь уравнение:', parse: parseEq, same: v => sameEquation(v, { x: 2, '': -26 }), reject: notSolved, wide: true,
+                   inputHint: 'Уравнение — с x и знаком «=», например x + (x + 5) = 30.', hint: 'Мальчики + девочки = 30: x + (x + 4) = 30.' }, math: 'x + (x + 4) = 30' },
+          { try: { label: 'Реши: x =', answer: 13, hint: '2x + 4 = 30 → 2x = 26.' }, math: 'x = 13: мальчиков 13, девочек 17.' },
+          { math: 'Проверка: 13 + 17 = 30 ✓, &nbsp; 17 − 13 = 4 ✓' }] },
+        { title: 'покупка — где нужна скобка', problem: 'Купили 3 ручки и 2 тетради и заплатили 110 руб. Тетрадь на 5 руб. дороже ручки. Сколько стоит ручка?', steps: [
+          { math: 'Пусть ручка стоит x руб. Тогда тетрадь — x + 5.' },
+          { think: true, math: '3x + 2(x + 5) = 110', why: '3 ручки — это 3x. 2 тетради — это 2 · (x + 5): <b>скобка обязательна</b>, ведь на 5 дороже <b>каждая</b> тетрадь.' },
+          { math: '3x + 2x + 10 = 110 &nbsp; → &nbsp; 5x = 100 &nbsp; → &nbsp; x = 20' },
+          { math: 'Ручка 20 руб., тетрадь 25 руб. Проверка: 3 · 20 + 2 · 25 = 60 + 50 = 110 ✓' }] },
+        { title: 'твоя очередь: «в несколько раз»', problem: 'Ленту длиной 36 см разрезали на две части. Одна в 3 раза длиннее другой. Какой длины короткая часть?', steps: [
+          { math: 'Пусть короткая часть x см. Длинная — 3x.', why: '«В 3 раза длиннее» — <b>умножаем</b> на 3, а не прибавляем.',
+            pic: modelBars([{ name: 'короткая', segs: [['x', 12]] }, { name: 'длинная', segs: [['x', 12], ['x', 12], ['x', 12]] }], '36 см') },
+          { try: { label: 'Составь уравнение:', parse: parseEq, same: v => sameEquation(v, { x: 4, '': -36 }), reject: notSolved, wide: true,
+                   inputHint: 'Уравнение — с x и знаком «=».', hint: 'Короткая + длинная = 36: x + 3x = 36.' }, math: 'x + 3x = 36' },
+          { try: { label: 'x =', answer: 9, hint: '4x = 36.' }, math: 'x = 9: короткая 9 см, длинная 27 см. Проверка: 9 + 27 = 36 ✓' }] }],
+      rule: `<ul><li><b>Рецепт:</b> 1) за x — то, что спрашивают; 2) остальное вырази через x; 3) найди «равно» (вместе, всего, заплатили).</li>
+        <li>«На 5 больше» → x + 5. «В 3 раза больше» → 3x.</li>
+        <li>Несколько одинаковых предметов дороже на сколько-то — нужна скобка: 2(x + 5).</li>
+        <li><b>Проверяй по условию задачи</b>, а не по уравнению.</li></ul>` },
+    oops: [['Корзины: 46 : 2 = 23 — во второй 23 яблока', 'Поровну делить нельзя: в первой на 8 больше. Проверка: 23 + 31 = 54, а не 46. Правильно: x + (x + 8) = 46, x = <b>19</b>.'],
+           ['Ручки и тетради: 3x + 2x + 5 = 110', 'На 5 дороже <b>каждая</b> тетрадь: 2(x + 5) = 2x + 10, а не 2x + 5.']] },
   { id: 'fn', title: 'Функция: формула и график', short: 'Функции', gen: genFunc,
-    theory: `<ul>
-      <li><b>Функция — это правило:</b> каждому x — ровно одно y. Формула y = 2x − 3 — это рецепт: «возьми x, умножь на 2, вычти 3».</li>
-      <li><b>Найти y по x — подставить.</b> x пишем в скобках, вместе со знаком:<br>при x = −4: y = 2 · (−4) − 3 = −8 − 3 = <b>−11</b>.</li>
-      <li><b>Найти x по y — решить уравнение.</b> y = 7: пишем 7 вместо y:<br>7 = 2x − 3 → 2x = 10 → x = <b>5</b>. Проверка: 2 · 5 − 3 = 7 ✓</li>
-      <li><b>Точка лежит на графике — значит, её координаты подходят к формуле.</b> A(2; 1) и y = 3x − 5: 3 · 2 − 5 = 1 ✓ — лежит.
-        B(−1; 2): 3 · (−1) − 5 = −8, а не 2 — не лежит.</li>
-      <li><b>Как построить график y = kx + b:</b> это прямая, хватит двух точек. Удобно взять x = 0 и x = 1, посчитать y по формуле и отметить.<br>
-        y = −2x + 1: x = 0 → y = 1; &nbsp; x = 1 → y = −1.
-        ${plane({ lines: [{ k: -2, b: 1 }], points: [{ x: 0, y: 1 }, { x: 1, y: -1 }] })}</li>
-      <li><b>y = kx + b — линейная функция.</b> k — число при x (наклон): k &gt; 0 — прямая идёт вверх, k &lt; 0 — вниз, k = 0 — горизонтально.
-        b — число без x: в этой точке прямая пересекает ось y.<br>
-        y = 5 — тоже линейная: это y = 0 · x + 5. А y = x² и y = ${fr(2, 'x')} — нет: x в квадрате или в знаменателе.</li>
-      <li><b>Пересечение с осями.</b> На оси y x = 0 → точка (0; b). На оси x y = 0 → пишем 0 вместо y и решаем уравнение.<br>
-        y = 2x − 4: с осью y — (0; −4); с осью x — 0 = 2x − 4, x = 2 → (2; 0).</li>
-      <li><b>Две прямые.</b> k одинаковые, b разные — параллельны. k разные — пересекаются.</li>
-      <li><b>Задачи.</b> То, что есть с самого начала или платится один раз, — b. То, что добавляется за каждую единицу, — k.<br>
-        Такси: 100 руб. посадка и 30 руб. за км → y = 30x + 100.</li></ul>`,
+    lesson: {
+      hook: 'Функция — это <b>рецепт</b>: дают x, по формуле получаешь y. Почти всё в этой теме — одно действие: подставить число в формулу.',
+      examples: [
+        { title: 'формула — это рецепт', problem: 'y = 2x − 3. Найди y при x = −4.', steps: [
+          { math: 'Рецепт: «возьми x, умножь на 2, вычти 3».', why: 'Так читается формула y = 2x − 3.' },
+          { think: true, math: 'y = 2 · (−4) − 3', why: 'Вместо x пишем −4 — <b>в скобках</b>, вместе с минусом.' },
+          { math: 'y = −8 − 3 = −11', why: 'Сначала умножение: 2 · (−4) = −8. Потом −8 − 3 = −11.' },
+          { math: 'Точка (−4; −11) лежит на графике.', why: 'Пара «x и его y» — это точка графика. Поэтому «лежит ли точка на графике» проверяется так же: подставь x и сравни y.' }] },
+        { title: 'твоя очередь', problem: 'y = x² − 1. Найди y при x = 3 и при x = −2.', steps: [
+          { try: { label: 'x = 3: &nbsp; y = 3² − 1 =', answer: 8, hint: '3² = 3 · 3 = 9. Потом минус 1.' }, math: 'x = 3: y = 9 − 1 = 8' },
+          { try: { label: 'x = −2: &nbsp; y = (−2)² − 1 =', answer: 3, hint: '(−2)² = (−2) · (−2) = 4 — минус на минус даёт плюс.' },
+            math: 'x = −2: y = 4 − 1 = 3', why: 'x в скобках вместе с минусом — и квадрат получается положительным.' }] },
+        { title: 'наоборот: x по y', problem: 'y = 2x − 3. При каком x значение y = 7?', steps: [
+          { think: true, math: '7 = 2x − 3', why: 'Теперь известен y. Пишем 7 вместо y — получилось уравнение.' },
+          { math: '2x = 7 + 3 = 10 &nbsp; → &nbsp; x = 5', why: '−3 переносим вправо со сменой знака, потом делим на 2.' },
+          { math: 'Проверка: 2 · 5 − 3 = 7 ✓' }] },
+        { title: 'строим график', problem: 'Построй график y = −2x + 1.', steps: [
+          { math: 'График y = kx + b — прямая. Нужны две точки.', why: 'Через две точки проходит ровно одна прямая. Удобно взять x = 0 и x = 1.' },
+          { try: { label: 'x = 0: &nbsp; y = −2 · 0 + 1 =', answer: 1, hint: '−2 · 0 = 0, плюс 1.' }, math: 'x = 0 → y = 1, точка (0; 1)' },
+          { try: { label: 'x = 1: &nbsp; y = −2 · 1 + 1 =', answer: -1, hint: '−2 · 1 = −2, плюс 1.' }, math: 'x = 1 → y = −1, точка (1; −1)' },
+          { math: 'Отмечаем две точки и проводим прямую.', why: 'k = −2 — меньше нуля, прямая идёт вниз. b = 1 — пересекает ось y в точке 1.',
+            pic: plane({ lines: [{ k: -2, b: 1 }], points: [{ x: 0, y: 1 }, { x: 1, y: -1 }] }) }] },
+        { title: 'задача → формула', problem: 'Такси: 100 руб. за посадку и 30 руб. за каждый километр. Сколько стоит поездка на x км?', steps: [
+          { think: true, math: 'За каждый км — 30 руб. → 30x', why: 'Это растёт с каждым километром: число <b>при x</b>.' },
+          { think: true, math: 'Посадка — 100 руб. один раз → + 100', why: 'Платится всегда, даже за 0 км: число <b>без x</b>.' },
+          { math: 'y = 30x + 100' },
+          { try: { label: 'Поездка на 12 км: y = 30 · 12 + 100 =', answer: 460, hint: '30 · 12 = 360, и не забудь посадку.' }, math: '30 · 12 + 100 = 460 руб.' }] }],
+      rule: `<ul><li><b>Найти y по x — подставить</b> x в скобках, со знаком. <b>Найти x по y — решить уравнение.</b></li>
+        <li><b>Точка на графике</b> — её координаты подходят к формуле.</li>
+        <li><b>y = kx + b — прямая.</b> Строим по двум точкам (x = 0 и x = 1). k — наклон (k &gt; 0 вверх, k &lt; 0 вниз, k = 0 горизонтально), b — где пересекает ось y.
+          y = 5 — тоже линейная (k = 0). y = x² и y = ${fr(2, 'x')} — нет.</li>
+        <li><b>Оси:</b> на оси y x = 0 → (0; b); на оси x y = 0 → реши 0 = kx + b.</li>
+        <li><b>Две прямые:</b> k одинаковые, b разные — параллельны; k разные — пересекаются.</li>
+        <li><b>Задачи:</b> что платится один раз — b, что за каждую единицу — k.</li></ul>` },
     oops: [['y = −2x + 1: точки (0; −1) и (−1; 0)', 'Точки угаданы, а их надо посчитать. x = 0: y = −2 · 0 + 1 = <b>1</b> → (0; 1). x = −1: y = −2 · (−1) + 1 = <b>3</b> → (−1; 3).'],
            ['Такси: 100 руб. посадка + 30 руб. за км. Формула y = x, поездка на 12 км — 360 руб.', 'Посадку забыли. За каждый км — 30 (это k), посадка один раз — 100 (это b): y = 30x + 100. 12 км: 30 · 12 + 100 = <b>460</b> руб.'],
            ['y = 5 — не линейная, там же нет x', 'y = 5 — это y = 0 · x + 5. Линейная, k = 0. Её график — горизонтальная прямая.'],
@@ -841,8 +1378,8 @@ const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемеш
 // Topic numbers follow the course: the 5–6 grade base first, then the chapters of
 // «Алгебра 7» (Макарычев и др.), then what the textbook leaves for grade 8.
 const SECTIONS = [
-  { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'mix', 'neg', 'unk'] },
-  { title: 'Учебник, глава 1. Выражения, тождества, уравнения', ids: ['brk'] },
+  { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
+  { title: 'Учебник, глава 1. Выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
   { title: 'Учебник, глава 2. Функции', ids: ['fn'] },
   { title: 'Учебник, глава 3. Степень с натуральным показателем', ids: ['pow'] },
   { title: 'Из учебника 8 класса', ids: ['int'] },
@@ -854,6 +1391,7 @@ const KEY = 'algebra7-trainer-v1';
 let store = JSON.parse(localStorage.getItem(KEY) || '{}');
 store.stats = store.stats || {};
 store.log = store.log || [];
+store.lessons = store.lessons || {};
 const save = () => localStorage.setItem(KEY, JSON.stringify(store));
 const today = () => new Date().toISOString().slice(0, 10);
 function st(id) {
@@ -888,7 +1426,7 @@ function home() {
         const s = st(m.id), done = s.mastered.includes(today());
         return `<button class="mod-btn" data-mod="${m.id}"><b>${m.n}. ${m.title}</b>
           <small>решено ${s.solved}, верно с первой попытки ${s.firstTry}</small>
-          <span class="badge${done ? ' done' : ''}">${done ? 'сегодня освоено ✓' : `серия ${s.streak} из 5`}</span></button>`;
+          <span class="badge${done ? ' done' : ''}">${done ? 'сегодня освоено ✓' : m.lesson && !store.lessons[m.id] ? 'начни с разбора' : `серия ${s.streak} из 5`}</span></button>`;
       }).join('')).join('')}
       <h3 class="sec">Всё вместе</h3>
       <button class="mod-btn mix" data-mod="${MIX.id}"><b>${MIX.title}</b>
@@ -904,15 +1442,90 @@ function home() {
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
 }
 
+const oopsHtml = mod => mod.oops.map(([wrong, why]) => `<div class="oops"><b>Петя написал: ${wrong}</b>
+  <details><summary>Где ошибка? (сначала подумай сам)</summary><p>${why}</p></details></div>`).join('');
+
+// Worked examples revealed one step at a time; "your turn" steps make him write the step himself.
+// "Решать" appears only at the end, so the lesson cannot be scrolled past.
+function lessonScreen(mod) {
+  const L = mod.lesson, seen = !!store.lessons[mod.id];
+  app.innerHTML = `
+    <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button>
+      ${seen ? '<button class="ghost" id="skip">Разбор уже пройден — сразу решать →</button>' : ''}</div>
+    <div class="card theory"><h2>${mod.n}. ${mod.title}</h2><p class="hook">${L.hook}</p>
+      <div id="lesson"></div><div class="row" id="lnext"></div></div>`;
+  document.getElementById('back').onclick = home;
+  if (seen) document.getElementById('skip').onclick = () => { session = { mod }; nextTask(); };
+  const items = L.examples.flatMap((ex, i) => [{ ex: i }, ...ex.steps.map((s, j) => ({ ex: i, step: j }))]);
+  const box = document.getElementById('lesson'), nextBox = document.getElementById('lnext');
+  const stepOf = it => L.examples[it.ex].steps[it.step];
+  let p = 0;
+  const reveal = (s, li, note = '') => {
+    li.innerHTML = `${note}<div class="lmath">${s.math}</div>${s.why ? `<div class="lwhy">${s.why}</div>` : ''}${s.pic || ''}`;
+  };
+  function advance() {
+    if (p >= items.length) return finish();
+    const it = items[p++];
+    if (it.step === undefined) {
+      const ex = L.examples[it.ex];
+      box.insertAdjacentHTML('beforeend', `<div class="lex"><div class="lex-h">Пример ${it.ex + 1} из ${L.examples.length}${ex.title ? ' · ' + ex.title : ''}</div>
+        <div class="lproblem">${ex.problem}</div><ol class="lsteps" id="lex${it.ex}"></ol></div>`);
+      box.lastElementChild.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      return wait();
+    }
+    const s = stepOf(it), li = document.createElement('li');
+    li.className = 'lstep';
+    document.getElementById('lex' + it.ex).appendChild(li);
+    if (s.try) return yourTurn(s, li);
+    reveal(s, li);
+    li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    wait();
+  }
+  function wait() {
+    if (p >= items.length) return finish();
+    const nx = items[p];
+    if (nx.step !== undefined && stepOf(nx).try) { nextBox.innerHTML = ''; return advance(); }
+    const s = nx.step !== undefined ? stepOf(nx) : null;
+    nextBox.innerHTML = `${s && s.think ? '<div class="think">🤔 Как думаешь, какой следующий шаг? Подумай — потом открой.</div>' : ''}
+      <button class="main" id="lgo">${s ? `Шаг ${nx.step + 1} из ${L.examples[nx.ex].steps.length} →` : 'Следующий пример →'}</button>`;
+    document.getElementById('lgo').onclick = advance;
+  }
+  function yourTurn(s, li) {
+    nextBox.innerHTML = '';
+    li.innerHTML = `<div class="ltry"><div class="step-lbl">✍️ <b>Твоя очередь.</b> ${s.try.label}</div>
+      <input type="text" autocomplete="off"${s.try.wide ? ' style="width:320px"' : ''}> <button class="main">Проверить</button><div class="lfb"></div></div>`;
+    const inp = li.querySelector('input'), btn = li.querySelector('button'), fb = li.querySelector('.lfb');
+    let tries = 0;
+    inp.focus();
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
+    btn.onclick = () => {
+      const v = (s.try.parse || parse)(inp.value);
+      if (!v) { fb.innerHTML = `<div class="msg warn">${s.try.inputHint || 'Впиши ответ числом.'}</div>`; return; }
+      if (s.try.reject && s.try.reject(v)) { fb.innerHTML = `<div class="msg warn">${s.try.reject(v)}</div>`; return; }
+      if (stepRight(s.try, v.value)) { reveal(s, li, `<div class="msg ok">✓ Верно: ${esc(inp.value)}</div>`); return wait(); }
+      if (++tries < 2) { fb.innerHTML = `<div class="msg bad">Пока не так. ${s.try.hint}</div>`; return; }
+      reveal(s, li, `<div class="msg bad">Не беда — вот как правильно:</div>`);
+      wait();
+    };
+  }
+  function finish() {
+    store.lessons[mod.id] = today(); save();
+    box.insertAdjacentHTML('beforeend', `<div class="rule"><h3>📌 Запомни</h3>${L.rule}</div><h3>Найди ошибку Пети</h3>${oopsHtml(mod)}`);
+    nextBox.innerHTML = '<button class="main" id="go">Решать →</button>';
+    document.getElementById('go').onclick = () => { session = { mod }; nextTask(); };
+  }
+  advance();
+}
+
 function intro(mod) {
+  if (mod.lesson) return lessonScreen(mod);
   app.innerHTML = `
     <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button></div>
     <div class="card theory">
       <h2>${mod.n}. ${mod.title}</h2>
       <h3>Как думать</h3>${mod.theory}
       <h3>Найди ошибку Пети</h3>
-      ${mod.oops.map(([wrong, why], i) => `<div class="oops"><b>Петя написал: ${wrong}</b>
-        <details><summary>Где ошибка? (сначала подумай сам)</summary><p>${why}</p></details></div>`).join('')}
+      ${oopsHtml(mod)}
       <div class="row"><button class="main" id="go">Решать →</button></div>
     </div>`;
   document.getElementById('back').onclick = home;
@@ -935,6 +1548,10 @@ function renderTask() {
   const { task, taskMod } = session;
   const s = st(taskMod.id);
   const isMix = session.mod === MIX;
+  const scafs = scaffoldsOf(task);
+  let num = 0;
+  const mark = () => '①②③④⑤⑥'[num++];
+  const multi = task.predict || scafs.length || task.check;
   app.innerHTML = `
     <div class="row between" style="margin-top:0">
       <button class="ghost" id="back">← Все темы</button>
@@ -943,14 +1560,15 @@ function renderTask() {
     <div class="card">
       ${isMix ? '' : `<div class="streak">${[0, 1, 2, 3, 4].map(i => `<span class="${i < Math.min(s.streak, 5) ? 'on' : ''}"></span>`).join('')}</div>`}
       <div class="q">${task.q}${task.expr ? ' = ?' : ''}</div>
-      ${task.predict ? `<div class="step"><div class="step-lbl">① ${task.predict.label}</div>
+      ${task.predict ? `<div class="step"><div class="step-lbl">${mark()} ${task.predict.label}</div>
         <div class="choices">${task.predict.options.map(o => `<label><input type="radio" name="pred" value="${o}"><span>${o}</span></label>`).join('')}</div></div>` : ''}
-      ${task.scaffold ? `<div class="step"><div class="step-lbl">① ${task.scaffold.label}</div><input type="text" id="scaf" autocomplete="off"></div>` : ''}
-      <div class="step"><div class="step-lbl">${task.predict || task.scaffold ? '②' : ''} Ответ${task.formHint ? ` <span class="muted">(${task.formHint})</span>` : ''}:</div>
+      ${scafs.map((sc, j) => `<div class="step"><div class="step-lbl">${mark()} ${sc.label}</div>
+        <input type="text" id="scaf${j}" autocomplete="off"${sc.wide ? ' style="width:320px"' : ''}></div>`).join('')}
+      <div class="step"><div class="step-lbl">${multi ? mark() : ''} Ответ${task.formHint ? ` <span class="muted">(${task.formHint})</span>` : ''}:</div>
         ${task.options
           ? `<div class="choices">${task.options.map(o => `<label><input type="radio" name="ans" value="${o}"><span>${o}</span></label>`).join('')}</div>`
           : `<input type="text" id="ans" autocomplete="off"${task.wide ? ' style="width:320px"' : ''}>`}</div>
-      ${task.check ? `<div class="step"><div class="step-lbl">③ ${task.check.label}</div><input type="text" id="chk" autocomplete="off"></div>` : ''}
+      ${task.check ? `<div class="step"><div class="step-lbl">${mark()} ${task.check.label}</div><input type="text" id="chk" autocomplete="off"></div>` : ''}
       <div class="row" id="buttons">
         <button class="main" data-conf="sure">Проверить — уверен</button>
         <button class="ghost" data-conf="doubt">Проверить — сомневаюсь</button>
@@ -982,11 +1600,13 @@ function submit(conf) {
   // 1. Everything filled in?
   const pred = app.querySelector('input[name=pred]:checked')?.value;
   if (task.predict && !pred) return feedback('warn', 'Сначала прикинь ответ — выбери вариант в пункте ①. Это и есть самопроверка.');
-  let scaf = null;
-  if (task.scaffold) {
-    scaf = parse(document.getElementById('scaf').value);
-    if (!scaf) return feedback('warn', 'Заполни пункт ① — это подсказка к ответу.');
-    if (!eq(scaf.value, task.scaffold.answer)) return feedback('warn', `Пункт ① пока не так. ${task.scaffold.hint}`);
+  const scafs = scaffoldsOf(task), first = task.predict ? 1 : 0;
+  for (const [j, sc] of scafs.entries()) {
+    const n = '①②③④⑤⑥'[first + j];
+    const sp = (sc.parse || parse)(document.getElementById('scaf' + j).value);
+    if (!sp) return feedback('warn', `Заполни пункт ${n} — это шаг к ответу.${sc.inputHint ? ' ' + sc.inputHint : ''}`);
+    if (sc.reject && sc.reject(sp)) return feedback('warn', `Пункт ${n}: ${sc.reject(sp)}`);
+    if (!stepRight(sc, sp.value)) return feedback('warn', `Пункт ${n} пока не так. ${sc.hint}`);
   }
   const typed = task.options ? app.querySelector('input[name=ans]:checked')?.value || '' : document.getElementById('ans').value.trim();
   const p = task.options ? (typed ? { value: typed, form: 'choice' } : null) : (task.parseAns || parse)(typed);
@@ -995,7 +1615,7 @@ function submit(conf) {
   let chk = null;
   if (task.check) {
     chk = parse(document.getElementById('chk').value);
-    if (!chk) return feedback('warn', 'Сделай проверку — пункт ③. Это самое важное в задаче.');
+    if (!chk) return feedback('warn', `Сделай проверку — пункт ${'①②③④⑤⑥'[first + scafs.length + 1]}. Это самое важное в задаче.`);
   }
 
   // 2. Did his own check catch the mistake? That is a win, not a failed try.
@@ -1006,17 +1626,26 @@ function submit(conf) {
   if (task.predict && task.predict.ref !== undefined && !eq(p.value, task.predict.ref)
       && (p.value > task.predict.ref ? 'больше' : 'меньше') !== pred)
     return selfCatch(`Ты прикинул, что ответ будет ${pred}, чем ${fmt(task.predict.ref)}, а написал ${fmt(p.value)}. Что-то одно неверно.`);
-  if (task.check) {
+  if (task.check && task.check.targetOf) {
+    // Equation check: he substitutes his x into the left side; the right side at his x is
+    // the target. First make sure the substitution itself was counted right.
+    const own = task.check.compute(p.value), other = task.check.targetOf(p.value);
+    if (!eq(chk.value, own))
+      return feedback('warn', `Посчитай проверку ещё раз: при x = ${fmt(p.value)} левая часть равна ${fmt(own)}, а не ${fmt(chk.value)}.`);
+    if (!eq(own, other))
+      return selfCatch(`Левая часть при x = ${fmt(p.value)} равна ${fmt(own)}, а правая — ${fmt(other)}. Не равны — значит, ${fmt(p.value)} не корень.`);
+  } else if (task.check) {
     const own = task.check.compute ? task.check.compute(p.value) : null;
     // A letter that is not in the task has no value to substitute: say so instead of showing NaN.
     if (own !== null && !Number.isFinite(own))
       return feedback('warn', 'В ответе есть буква, которой нет в задаче. Пиши только те буквы, что в условии, латиницей.');
-    if (!eq(chk.value, task.check.target))
-      return selfCatch(`Проверка дала ${fmt(chk.value)}, а должно получиться ${fmt(task.check.target)}.`);
-    if (own !== null && !eq(own, task.check.target))
+    // A slip in the check's own arithmetic is not a caught mistake: ask to recount first.
+    if (own !== null && !eq(chk.value, own))
       return feedback('warn', task.parseAns
         ? `Посчитай проверку ещё раз: если подставить эти числа в твой ответ, получится ${fmt(round6(own))}, а не ${fmt(chk.value)}.`
         : `Посчитай проверку ещё раз: с твоим ответом ${fmt(p.value)} получается ${fmt(round6(own))}, а не ${fmt(chk.value)}.`);
+    if (!eq(chk.value, task.check.target))
+      return selfCatch(`Проверка дала ${fmt(chk.value)}, а должно получиться ${fmt(task.check.target)}.`);
   }
 
   // 3. Grade.
@@ -1024,6 +1653,8 @@ function submit(conf) {
   const right = valueRight && (!task.form || p.form === task.form);
   const rightValueWrongForm = valueRight && task.form && p.form !== task.form;
   if (rightValueWrongForm) return feedback('warn', `Значение верное, но запиши в нужном виде. ${task.formHint}`);
+  const formMsg = valueRight && task.formOk ? task.formOk(p) : null;
+  if (formMsg) return feedback('warn', formMsg);
   const predWrong = task.predict && pred !== task.predict.correct;
 
   session.tries++;
