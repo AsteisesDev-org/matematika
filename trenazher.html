@@ -22,6 +22,18 @@
   .card { background: var(--card); border-radius: 14px; padding: 22px 24px;
           box-shadow: 0 1px 3px rgba(0,0,0,.08); margin: 16px 0; }
   .mods { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .mod-card { border: 2px solid var(--line); background: var(--card); border-radius: 12px; padding: 14px 16px; }
+  .mod-card > b { display: block; font-size: 18px; }
+  .mod-card small { color: var(--muted); display: block; margin-top: 4px; }
+  .parts { display: flex; gap: 8px; margin: 10px 0 2px; }
+  .part { flex: 1; font: inherit; font-size: 15px; font-weight: 600; padding: 8px 6px; border-radius: 9px; cursor: pointer;
+          border: 2px solid var(--accent); background: #fff; color: var(--accent); }
+  .mod-card.fresh .part.theory { background: var(--accent); color: #fff; }
+  .part.theory.passed { border-color: var(--ok); color: var(--ok); }
+  .part:disabled, .stage:disabled, .mod-btn:disabled { border-color: var(--line); background: #f1f2f6; color: var(--muted); cursor: not-allowed; }
+  .stages { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; }
+  .stage { font: inherit; font-size: 15px; padding: 5px 12px; border-radius: 99px; border: 2px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+  .stage.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; cursor: default; }
   .mods h3.sec { grid-column: 1 / -1; margin: 10px 0 -4px; font-size: 16px; color: var(--muted); }
   .mod-btn { text-align: left; border: 2px solid var(--line); background: var(--card); border-radius: 12px;
              padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; }
@@ -1558,6 +1570,7 @@ function home() {
     <div class="card">
       <h2>Как заниматься</h2>
       <ul>
+        <li><b>В каждой теме две части:</b> 📖 <b>теория</b> — разбор на примерах, и ✏️ <b>практика</b> — задачи. Практика открывается 🔒, когда пройдёшь теорию до конца.</li>
         <li><b>15–20 минут в день.</b> Одна тема — пока не будет <b>5 верных подряд</b>, потом «Перемешка».</li>
         <li><b>Прикидывай до того, как считать.</b> Тренажёр спросит: какой будет знак, больше или меньше. Это главный навык — так ловят свои ошибки.</li>
         <li><b>Проверяй.</b> Где просят проверку — сделай её честно. Если не сошлось, ты <b>сам поймал ошибку</b> — это засчитывается как победа.</li>
@@ -1568,14 +1581,23 @@ function home() {
     </div>
     <div class="mods">
       ${SECTIONS.map(sec => `<h3 class="sec">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
-        const s = st(m.id), done = s.mastered.includes(today());
-        return `<button class="mod-btn" data-mod="${m.id}"><b>${m.n}. ${m.title}</b>
-          <small>решено ${s.solved}, верно с первой попытки ${s.firstTry}</small>
-          <span class="badge${done ? ' done' : ''}">${done ? 'сегодня освоено ✓' : m.lesson && !store.lessons[m.id] ? 'начни с разбора' : `серия ${s.streak} из 5`}</span></button>`;
+        const s = st(m.id), mastered = s.mastered.includes(today()), open = theoryDone(m);
+        return `<div class="mod-card${open ? '' : ' fresh'}"><b>${m.n}. ${m.title}</b>
+          <div class="parts">
+            <button class="part theory${open ? ' passed' : ''}" data-theory="${m.id}">📖 Теория${open ? ' ✓' : ''}</button>
+            <button class="part practice" data-practice="${m.id}"${open ? '' : ' disabled title="Сначала пройди теорию"'}>${open ? '✏️' : '🔒'} Практика</button>
+          </div>
+          ${open ? `<small>решено ${s.solved}, верно с первой попытки ${s.firstTry}</small>
+            <span class="badge${mastered ? ' done' : ''}">${mastered ? 'сегодня освоено ✓' : `серия ${s.streak} из 5`}</span>`
+            : '<small>Начни с теории — практика откроется после неё.</small>'}</div>`;
       }).join('')).join('')}
       <h3 class="sec">Всё вместе</h3>
-      <button class="mod-btn mix" data-mod="${MIX.id}"><b>${MIX.title}</b>
-        <small>${MIX.size} задач из всех тем вперемешку. Делать в конце каждого занятия.</small></button>
+      ${(() => {
+        const ready = MODULES.filter(theoryDone).length;
+        return `<button class="mod-btn mix" data-mod="${MIX.id}"${ready ? '' : ' disabled'}><b>${ready ? '' : '🔒 '}${MIX.title}</b>
+          <small>${ready ? `${MIX.size} задач вперемешку из тем, где пройдена теория (сейчас ${ready} из ${MODULES.length}). Делать в конце каждого занятия.`
+            : 'Откроется, когда пройдёшь теорию хотя бы одной темы.'}</small></button>`;
+      })()}
     </div>
     <div class="card">
       <h2>Отправить результаты</h2>
@@ -1583,8 +1605,27 @@ function home() {
       <div class="row"><button class="main" id="copy">Скопировать результаты</button>
         <a href="./" class="muted" style="margin-left:auto">← к диагностической работе</a></div>
     </div>`;
-  app.querySelectorAll('[data-mod]').forEach(b => b.onclick = () => b.dataset.mod === MIX.id ? startMix() : intro(MODULES.find(m => m.id === b.dataset.mod)));
+  app.querySelectorAll('[data-mod]').forEach(b => b.onclick = startMix);
+  app.querySelectorAll('[data-theory]').forEach(b => b.onclick = () => intro(MODULES.find(m => m.id === b.dataset.theory)));
+  app.querySelectorAll('[data-practice]').forEach(b => b.onclick = () => practice(MODULES.find(m => m.id === b.dataset.practice)));
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
+}
+
+const theoryDone = m => !m.lesson || !!store.lessons[m.id];
+const practice = m => { if (!theoryDone(m)) return intro(m); session = { mod: m }; nextTask(); };
+// "① Теория → ② Практика" strip at the top of a topic: shows where he is and lets him switch.
+function stages(m, current) {
+  const open = theoryDone(m);
+  const html = `<div class="stages">
+    <button class="stage${current === 1 ? ' on' : ''}" data-stage="1">📖 Теория${open ? ' ✓' : ''}</button><span class="muted">→</span>
+    <button class="stage${current === 2 ? ' on' : ''}" data-stage="2"${open ? '' : ' disabled title="Сначала пройди теорию"'}>${open ? '✏️' : '🔒'} Практика</button></div>`;
+  return html;
+}
+function wireStages(m) {
+  app.querySelectorAll('[data-stage]').forEach(b => b.onclick = () => {
+    if (b.classList.contains('on')) return;
+    if (b.dataset.stage === '1') intro(m); else practice(m);
+  });
 }
 
 const oopsHtml = mod => mod.oops.map(([wrong, why]) => `<div class="oops"><b>Петя написал: ${wrong}</b>
@@ -1593,14 +1634,15 @@ const oopsHtml = mod => mod.oops.map(([wrong, why]) => `<div class="oops"><b>П�
 // Worked examples revealed one step at a time; "your turn" steps make him write the step himself.
 // "Решать" appears only at the end, so the lesson cannot be scrolled past.
 function lessonScreen(mod) {
-  const L = mod.lesson, seen = !!store.lessons[mod.id];
+  const L = mod.lesson;
   app.innerHTML = `
-    <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button>
-      ${seen ? '<button class="ghost" id="skip">Разбор уже пройден — сразу решать →</button>' : ''}</div>
-    <div class="card theory"><h2>${mod.n}. ${mod.title}</h2><p class="hook">${L.hook}</p>
+    <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button></div>
+    <div class="card theory"><h2>${mod.n}. ${mod.title}</h2><div id="stages">${stages(mod, 1)}</div>
+      ${theoryDone(mod) ? '<p class="muted">Теорию ты уже прошёл — можно повторить её или сразу перейти к практике.</p>' : ''}
+      <p class="hook">${L.hook}</p>
       <div id="lesson"></div><div class="row" id="lnext"></div></div>`;
   document.getElementById('back').onclick = home;
-  if (seen) document.getElementById('skip').onclick = () => { session = { mod }; nextTask(); };
+  wireStages(mod);
   const items = L.examples.flatMap((ex, i) => [{ ex: i }, ...ex.steps.map((s, j) => ({ ex: i, step: j }))]);
   const box = document.getElementById('lesson'), nextBox = document.getElementById('lnext');
   const stepOf = it => L.examples[it.ex].steps[it.step];
@@ -1656,8 +1698,11 @@ function lessonScreen(mod) {
   function finish() {
     store.lessons[mod.id] = today(); save();
     box.insertAdjacentHTML('beforeend', `<div class="rule"><h3>📌 Запомни</h3>${L.rule}</div><h3>Найди ошибку Пети</h3>${oopsHtml(mod)}`);
-    nextBox.innerHTML = '<button class="main" id="go">Решать →</button>';
-    document.getElementById('go').onclick = () => { session = { mod }; nextTask(); };
+    // The practice part has just unlocked: show it in the strip and offer the way in.
+    document.getElementById('stages').innerHTML = stages(mod, 1);
+    wireStages(mod);
+    nextBox.innerHTML = '<div class="think">🔓 Теория пройдена — практика открыта!</div><button class="main" id="go">✏️ К практике →</button>';
+    document.getElementById('go').onclick = () => practice(mod);
   }
   advance();
 }
@@ -1684,7 +1729,8 @@ function startMix() {
 
 function nextTask() {
   if (session.mod === MIX && session.mixLeft === 0) return mixSummary();
-  const m = session.mod === MIX ? pick(MODULES) : session.mod;
+  // Mix draws only from topics whose theory is done: no tasks from a topic he has not opened yet.
+  const m = session.mod === MIX ? pick(MODULES.filter(theoryDone)) : session.mod;
   Object.assign(session, { task: m.gen(), taskMod: m, tries: 0, caught: false, finished: false });
   renderTask();
 }
@@ -1703,6 +1749,7 @@ function renderTask() {
       <span class="muted">${isMix ? `Перемешка: задача ${session.mixDone + 1} из ${MIX.size}` : `${taskMod.n}. ${taskMod.title}`}</span>
     </div>
     <div class="card">
+      ${isMix ? '' : stages(taskMod, 2)}
       ${isMix ? '' : `<div class="streak">${[0, 1, 2, 3, 4].map(i => `<span class="${i < Math.min(s.streak, 5) ? 'on' : ''}"></span>`).join('')}</div>`}
       <div class="q">${task.q}${task.expr ? ' = ?' : ''}</div>
       ${task.predict ? `<div class="step"><div class="step-lbl">${mark()} ${task.predict.label}</div>
@@ -1721,6 +1768,7 @@ function renderTask() {
       <div id="feedback"></div>
     </div>`;
   document.getElementById('back').onclick = home;
+  if (!isMix) wireStages(taskMod);
   app.querySelectorAll('[data-conf]').forEach(b => b.onclick = () => submit(b.dataset.conf));
   app.querySelectorAll('input[type=text]').forEach((inp, i, all) => inp.onkeydown = e => {
     if (e.key !== 'Enter') return;
