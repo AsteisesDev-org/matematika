@@ -2362,13 +2362,17 @@ const MODULES = [
 ];
 const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемешка', size: 10 };
 
-// Topic numbers follow the course: the 5–6 grade base first, then the chapters of
-// «Алгебра 7» (Макарычев и др.), then what the textbook leaves for grade 8.
+// Topic numbers follow the course: the 5–6 grade base first, then the textbook, then
+// what it leaves for grade 8. Group titles use the child's own book, which numbers
+// sections, not chapters: степень с натуральным показателем — § 2, одночлены и
+// y = x², y = x³ — § 7. Where the number is not confirmed, the title has none.
+// The order below is what numbers the topics — changing it renumbers them for the child.
 const SECTIONS = [
   { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
-  { title: 'Учебник, глава 1. Выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
-  { title: 'Учебник, глава 2. Функции', ids: ['fn'] },
-  { title: 'Учебник, глава 3. Степень с натуральным показателем', ids: ['pow', 'mono', 'monomul', 'sqcube'] },
+  { title: 'Учебник: выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
+  { title: 'Учебник: функция, формула и график', ids: ['fn'] },
+  { title: 'Учебник, глава 2. Степень с натуральным показателем', ids: ['pow'] },
+  { title: 'Учебник, глава 7. Одночлены', ids: ['mono', 'monomul', 'sqcube'] },
   { title: 'Из учебника 8 класса', ids: ['int'] },
 ];
 SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
