@@ -493,6 +493,135 @@ function sameEquation(d, target) {
 }
 const eqStr = (l, r) => `${fmtLinear(l, ['x', ''])} = ${fmtLinear(r, ['x', ''])}`;
 
+// ---------- monomials ----------
+// A monomial is { c: numeric coefficient, v: { letter: exponent } }.
+const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+const SUP = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
+const monoNeg = m => ({ c: -m.c, v: { ...m.v } });
+function monoMul(p, q) {
+  const v = { ...p.v };
+  for (const k in q.v) v[k] = (v[k] || 0) + q.v[k];
+  return { c: round6(p.c * q.c), v };
+}
+function monoPow(m, n) {
+  const v = {};
+  for (const k in m.v) v[k] = m.v[k] * n;
+  return { c: round6(Math.pow(m.c, n)), v };
+}
+const monoKeys = m => Object.keys(m.v).sort();
+const monoDeg = m => monoKeys(m).reduce((s, k) => s + m.v[k], 0);
+const sameMono = (p, q) => eq(p.c, q.c) &&
+  [...new Set([...monoKeys(p), ...monoKeys(q)])].every(k => (p.v[k] || 0) === (q.v[k] || 0));
+const evalMono = (m, vals) => round6(m.c * monoKeys(m).reduce((s, k) => s * Math.pow(vals[k], m.v[k]), 1));
+// Standard form on the screen: 20a⁴b⁵c
+function monoHtml(m, order = monoKeys(m)) {
+  if (!order.length) return fmt(m.c);
+  return (m.c < 0 ? '−' : '') + (eq(Math.abs(m.c), 1) ? '' : fmt(Math.abs(m.c))) +
+    order.map(k => k + (m.v[k] === 1 ? '' : `<sup>${m.v[k]}</sup>`)).join('');
+}
+// The same monomial the way he can type it into the box: 20a^4b^5c
+function monoTyped(m, order = monoKeys(m)) {
+  if (!order.length) return String(round6(m.c));
+  return (m.c < 0 ? '-' : '') + (eq(Math.abs(m.c), 1) ? '' : String(round6(Math.abs(m.c)))) +
+    order.map(k => k + (m.v[k] === 1 ? '' : '^' + m.v[k])).join('');
+}
+const monoParen = m => `(${monoHtml(m)})`;
+// Kids stumble on the caret more often than on the math: show how the answer is typed.
+const monoHowTo = m => {
+  const typed = monoTyped(m);
+  return `<p class="muted">В поле ответа это пишется так: <b>${typed}</b>` +
+    (typed.includes('^') ? ` (можно и без крышки: ${typed.replace(/\^/g, '')}).</p>` : '.</p>');
+};
+// Accepts "20a^4b^5c", "20a⁴b⁵c", "20a4b5c", "b · 4 · a · a · a", "x/2", "a^3 · -2".
+// A sum or a division by a letter is not a monomial: parseMono answers null.
+function parseMono(str) {
+  const raw = String(str || '');
+  if (/\d\s+\d/.test(raw)) return null;   // "2 3" is two numbers, not 23: never a monomial
+  let s = raw.toLowerCase().replace(/[асхуеорк]/g, ch => LOOKALIKE[ch])
+    .replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/[·×]/g, '*').replace(/\*\*/g, '^')
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, run => '^' + [...run].map(ch => SUP[ch]).join(''))
+    .replace(/\s+/g, '');
+  let i = 0;
+  const num = () => { const m = s.slice(i).match(/^\d+(\.\d+)?/); if (!m) return null; i += m[0].length; return +m[0]; };
+  const expo = () => {
+    if (s[i] !== '^') return 1;
+    i++;
+    const m = s.slice(i).match(/^\d+/);
+    if (!m) return null;
+    i += m[0].length;
+    return +m[0];
+  };
+  function atom() {
+    if (s[i] === '+') { i++; return atom(); }
+    if (s[i] === '-') { i++; const a = atom(); return a && monoNeg(a); }
+    if (s[i] === '(') {
+      i++;
+      const inner = prod();
+      if (!inner || s[i] !== ')') return null;
+      i++;
+      const n = expo();
+      return n === null ? null : monoPow(inner, n);
+    }
+    const L = s.slice(i).match(/^[a-z]/);
+    if (L) {
+      i++;
+      let n = expo();
+      if (n === null) return null;
+      if (n === 1 && /^\d/.test(s.slice(i))) {   // "a3" is a³: a digit right after a letter is its exponent
+        const m = s.slice(i).match(/^\d+/);
+        i += m[0].length;
+        n = +m[0];
+      }
+      if (s[i] === '/') { i++; const d = num(); return d === null || d === 0 ? null : { c: 1 / d, v: { [L[0]]: n } }; }
+      return { c: 1, v: { [L[0]]: n } };
+    }
+    const n = num();
+    if (n === null) return null;
+    if (s[i] === '^') {                       // "2^3a" is 8a: a power of a number is still a coefficient
+      const e = expo();
+      return e === null ? null : { c: round6(Math.pow(n, e)), v: {} };
+    }
+    if (s[i] === '/') { i++; const d = num(); return d === null || d === 0 ? null : { c: n / d, v: {} }; }
+    return { c: n, v: {} };
+  }
+  function prod() {
+    let acc = null, afterOp = false;
+    while (i < s.length && s[i] !== ')') {
+      if (s[i] === '*') { i++; afterOp = true; continue; }
+      if (s[i] === '/') return null;
+      if (acc && !afterOp && (s[i] === '+' || s[i] === '-')) return null;
+      const a = atom();
+      if (!a) return null;
+      acc = acc ? monoMul(acc, a) : a;
+      afterOp = false;
+    }
+    return acc;
+  }
+  if (!s) return null;
+  const v = prod();
+  if (!v || i !== s.length || !Number.isFinite(v.c)) return null;
+  for (const k in v.v) if (!Number.isInteger(v.v[k]) || v.v[k] < 1) return null;
+  return { value: v, form: 'mono' };
+}
+// "5a²bc · 4a²b⁴" — the product as the textbook writes it: brackets only where the sign needs them.
+const monoProduct = (p, q) => `${monoHtml(p)} · ${q.c < 0 ? monoParen(q) : monoHtml(q)}`;
+// One line per letter of a product: a² · a⁴ = a⁶, or "c — только в одном множителе".
+function monoMulLines(p, q) {
+  return monoKeys(monoMul(p, q)).map(k => {
+    const e1 = p.v[k] || 0, e2 = q.v[k] || 0, pow = e => k + (e === 1 ? '' : `<sup>${e}</sup>`);
+    if (!e1 || !e2) return `${pow(e1 || e2)} — только в одном множителе, остаётся ${pow(e1 || e2)}`;
+    return `${pow(e1)} · ${pow(e2)} = ${k}<sup>${e1}+${e2}</sup> = ${pow(e1 + e2)}`;
+  }).join('<br>');
+}
+const valsText = vals => Object.keys(vals).sort().map(k => `${k} = ${fmt(vals[k])}`).join(', ');
+// A "your turn" step can also expect a word, not a number.
+const parseWord = s => { const v = String(s || '').trim().toLowerCase(); return v ? { value: v, form: 'word' } : null; };
+const randMono = (letters, coef, exps) => {
+  const v = {};
+  for (const k of letters) if (Math.random() < 0.8) v[k] = pick(exps);
+  return { c: coef, v };
+};
+
 // ---------- pictures ----------
 // Balance scale: equal sides stay level; otherwise the heavier pan goes down.
 function balance(left, right, level = true, rightHeavier = true) {
@@ -813,6 +942,38 @@ function plane({ lines = [], points = [] }) {
   return s + '</svg>';
 }
 const inPlane = (...ps) => ps.every(([x, y]) => Math.abs(x) <= 6 && Math.abs(y) <= 6);
+// Plot for y = x² and y = x³: each axis gets its own scale, как на рис. 75–76 учебника.
+function curvePlot({ f, xr = 4, yr = 16, points = [], h = null, color = '#c9822b' }) {
+  const W = 340, H = 300, pad = 28;
+  const X = x => W / 2 + x * (W / 2 - pad) / xr, Y = y => H / 2 - y * (H / 2 - pad) / yr;
+  const sx = xr <= 5 ? 1 : 2, sy = [1, 2, 5, 10].find(s => yr / s <= 6) || 20;
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="border:1px solid #d8dce6;border-radius:8px">`;
+  // Grid starts at a multiple of the step, otherwise ticks land asymmetrically about zero.
+  const gx = -Math.floor(xr / sx) * sx, gy = -Math.floor(yr / sy) * sy;
+  for (let i = gx; i <= xr; i += sx) s += `<line x1="${X(i).toFixed(1)}" y1="${pad}" x2="${X(i).toFixed(1)}" y2="${H - pad}" stroke="#eceef3"/>`;
+  for (let j = gy; j <= yr; j += sy) s += `<line x1="${pad}" y1="${Y(j).toFixed(1)}" x2="${W - pad}" y2="${Y(j).toFixed(1)}" stroke="#eceef3"/>`;
+  s += `<line x1="${pad}" y1="${Y(0)}" x2="${W - pad}" y2="${Y(0)}" stroke="#333"/>
+    <line x1="${X(0)}" y1="${pad}" x2="${X(0)}" y2="${H - pad}" stroke="#333"/>
+    <text x="${W - pad + 6}" y="${Y(0) + 4}" font-size="13">x</text><text x="${X(0) + 6}" y="${pad - 10}" font-size="13">y</text>`;
+  for (let i = gx; i <= xr; i += sx) if (i) s += `<text x="${X(i).toFixed(1)}" y="${Y(0) + 14}" font-size="10" text-anchor="middle">${fmt(i)}</text>`;
+  for (let j = gy; j <= yr; j += sy) if (j) s += `<text x="${(X(0) - 5).toFixed(1)}" y="${(Y(j) + 3).toFixed(1)}" font-size="10" text-anchor="end">${fmt(j)}</text>`;
+  let d = '', pen = false;
+  for (let t = 0; t <= 240; t++) {
+    const x = -xr + 2 * xr * t / 240, y = f(x);
+    if (!Number.isFinite(y) || Math.abs(y) > yr) { pen = false; continue; }
+    d += `${pen ? 'L' : 'M'}${X(x).toFixed(1)},${Y(y).toFixed(1)}`;
+    pen = true;
+  }
+  s += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>`;
+  if (h !== null && Math.abs(h) <= yr)
+    s += `<line x1="${pad}" y1="${Y(h).toFixed(1)}" x2="${W - pad}" y2="${Y(h).toFixed(1)}" stroke="#3f6ad8" stroke-width="2" stroke-dasharray="6 4"/>`;
+  for (const p of points) {
+    if (Math.abs(p.x) > xr || Math.abs(p.y) > yr) continue;
+    s += `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4.5" fill="${p.color || '#c0392b'}"/>`;
+    if (!p.hide) s += `<text x="${(X(p.x) + 7).toFixed(1)}" y="${(Y(p.y) + (p.y > 0 ? -7 : 16)).toFixed(1)}" font-size="12" fill="${p.color || '#c0392b'}" font-weight="700">(${fmt(p.x)}; ${fmt(p.y)})</text>`;
+  }
+  return s + '</svg>';
+}
 const rhs = (k, b, constFirst) => fmtLinear({ x: k, '': b }, constFirst ? ['', 'x'] : ['x', '']);
 const kx = (k, x) => `${k === 1 ? '' : k === -1 ? '−' : fmt(k) + ' · '}${par(x)}`;
 const subst = (k, b, x) => kx(k, x) + (b ? (b < 0 ? ' − ' : ' + ') + fmt(Math.abs(b)) : '');
@@ -1066,6 +1227,514 @@ function genFunc() {
   };
 }
 const d2 = k => Math.round(1 / Math.abs(k));
+
+// ---------- monomials: what it is, coefficient, degree, value (учебник, §7 п. 21) ----------
+const MONO_LETTERS = [['a', 'b'], ['x', 'y'], ['a', 'b', 'c'], ['m', 'n'], ['p', 'q']];
+const MONO_TYPE = 'Запиши одночлен одним произведением: число впереди, затем буквы. Степень — как a^3 (можно и a3). Без скобок и без сложения, буквы — латинские.';
+const MONO_ITEMS = [
+  { t: '7', yes: true, why: 'Число — тоже одночлен, только без букв: его степень 0.' },
+  { t: 'a', yes: true, why: 'Одна буква — одночлен первой степени.' },
+  { t: '−3,8ab', yes: true, why: 'Это произведение числа и букв: минус и запятая коэффициенту не мешают.' },
+  { t: 'x<sup>2</sup>y<sup>5</sup>', yes: true, why: 'Степень буквы — та же серия множителей, значит всё вместе снова произведение.' },
+  { t: '0', yes: true, why: 'Число 0 — одночлен, но его степень не определена.' },
+  { t: '5 · x', yes: true, why: 'Произведение числа и буквы; в стандартном виде это 5x.' },
+  { t: 'x + 5', yes: false, why: 'Здесь сложение. В одночлене может быть только умножение.' },
+  { t: '12 − a', yes: false, why: 'Это разность двух выражений, а не произведение.' },
+  { t: 'a<sup>2</sup> + b<sup>2</sup>', yes: false, why: 'Сумма двух одночленов — это уже многочлен.' },
+  { t: 'x : y', yes: false, why: 'На букву делить нельзя: одночлен — это произведение, а не частное.' },
+  { t: 'x(x + 1)', yes: false, why: 'В скобке сумма. Если её раскрыть, выйдет x² + x — многочлен, а не одночлен.' },
+];
+const MONO_FORMULAS = [
+  { t: 'Ребро куба равно a. Запиши одночленом объём куба.', m: { c: 1, v: { a: 3 } },
+    wrong: { c: 3, v: { a: 1 } }, tip: 'Объём — это a · a · a, три множителя, а не 3 · a.' },
+  { t: 'Сторона квадрата равна 3a. Запиши одночленом его площадь.', m: { c: 9, v: { a: 2 } },
+    wrong: { c: 3, v: { a: 2 } }, tip: 'Числа тоже перемножаются: 3a · 3a = (3 · 3) · (a · a) = 9a².' },
+  { t: 'Сторона квадрата равна b. Запиши одночленом его периметр.', m: { c: 4, v: { b: 1 } },
+    wrong: { c: 1, v: { b: 4 } }, tip: 'Периметр — это сумма четырёх сторон: b + b + b + b = 4b. А b⁴ — это произведение.' },
+  { t: 'Ширина прямоугольника a, длина b. Запиши одночленом площадь.', m: { c: 1, v: { a: 1, b: 1 } },
+    wrong: null, tip: 'S = a · b = ab: две разные буквы в одну степень не сливаются.' },
+  { t: 'Скорость равна a км/ч, время 3 часа. Запиши одночленом путь.', m: { c: 3, v: { a: 1 } },
+    wrong: { c: 1, v: { a: 3 } }, tip: 'Путь = скорость · время: a · 3 = 3a.' },
+  { t: 'Число в 7 раз больше a. Запиши это число одночленом.', m: { c: 7, v: { a: 1 } },
+    wrong: { c: 1, v: { a: 7 } }, tip: '«В 7 раз больше» — это умножение на 7: 7 · a = 7a.' },
+  { t: 'Прямоугольный параллелепипед: ширина a, длина 2a, высота 3a. Запиши одночленом объём.',
+    m: { c: 6, v: { a: 3 } }, wrong: { c: 5, v: { a: 3 } },
+    tip: 'V = a · 2a · 3a: числа перемножаем (1 · 2 · 3 = 6), буквы складываем по показателям.' },
+];
+
+function genMono() {
+  const kind = pick(['is', 'is', 'std', 'std', 'coef', 'coef', 'deg', 'deg', 'value', 'value', 'formula']);
+
+  if (kind === 'is') {
+    const it = pick(MONO_ITEMS), ans = it.yes ? 'да' : 'нет';
+    return {
+      q: `Является ли одночленом выражение ${it.t}?`,
+      answer: ans, options: YESNO, same: v => v === ans,
+      diagnose: () => it.why,
+      solution: `<p>Одночлен — это произведение чисел и букв в натуральных степенях. Внутри него нет ни сложения, ни вычитания, ни деления на букву.</p>
+        <p>${it.t} — <b>${ans === 'да' ? 'одночлен' : 'не одночлен'}</b>. ${it.why}</p>
+        <p class="muted">Сумма одночленов (например x + 5) называется многочленом.</p>`
+    };
+  }
+
+  if (kind === 'std') {
+    // The coefficient always splits into two factors > 1, so «перемножь числа» never degenerates into «4 = 4».
+    let M;
+    do {
+      const abs = pick([4, 6, 8, 9, 10, 12, 14, 15, 16]);
+      M = randMono(pick(MONO_LETTERS), pick([abs, abs, -abs, -abs]), [1, 1, 2, 2, 3, 4]);
+    } while (monoDeg(M) < 3 || !monoKeys(M).some(k => M.v[k] > 1));
+    const abs = Math.abs(M.c);
+    const parts = abs % 3 === 0 ? [3, abs / 3] : [2, abs / 2];
+    const fs = parts.map((p, idx) => (M.c < 0 && idx === 0 ? '−' : '') + p);
+    // Only one letter is shown "unfolded" — the rest already stand as powers, как в учебнике 473.
+    const open = pick(monoKeys(M).filter(k => M.v[k] > 1));
+    for (const k of monoKeys(M)) {
+      if (k === open) for (let e = 0; e < M.v[k]; e++) fs.push(k);
+      else fs.push(k + (M.v[k] === 1 ? '' : `<sup>${M.v[k]}</sup>`));
+    }
+    const shown = shuffle(fs).join(' · ');
+    const nums = fs.filter(x => /^[−-]?\d+$/.test(x));
+    const vals = {};
+    for (const k of monoKeys(M)) vals[k] = pick([1, 2, 2, 3]);
+    const target = evalMono(M, vals);
+    const all1 = { c: M.c, v: Object.fromEntries(monoKeys(M).map(k => [k, 1])) };
+    return {
+      q: `Приведи одночлен к стандартному виду: ${shown}`,
+      answer: M, parseAns: parseMono, same: v => sameMono(v, M), wide: true,
+      inputHint: MONO_TYPE, formHint: 'число впереди, каждая буква — в одной степени',
+      scaffold: { label: `Сначала перемножь только числа: ${nums.join(' · ')} =`, answer: M.c,
+                  hint: 'Числовые множители перемножаются как обычно. Минус, если он есть, остаётся при ответе.' },
+      check: { label: `Проверь подстановкой (${valsText(vals)}): значение одночлена =`, target,
+               compute: v => evalMono(v, vals) },
+      diagnose(v) {
+        for (const k of monoKeys(M)) if (M.v[k] > 1 && sameMono(v, { c: round6(M.c * M.v[k]), v: all1.v }))
+          return `${k} · ${Array(M.v[k]).fill(k).join(' · ')} — это ${k}<sup>${M.v[k]}</sup>. А ${fmt(round6(M.c * M.v[k]))}${k} получилось бы при сложении: ${Array(M.v[k]).fill(k).join(' + ')}.`;
+        if (sameMono(v, all1)) return 'Ты оставил по одной букве каждого вида. Одинаковые буквы нужно собрать в одну степень: a · a · a = a³.';
+        if (sameMono({ c: M.c, v: v.v }, M)) return `Буквы собраны верно, а числа нет: ${nums.join(' · ')} = ${fmt(M.c)}.`;
+        return 'Числа перемножь отдельно, а одинаковые буквы собери в одну степень — показатель равен числу таких множителей.';
+      },
+      solution: `<p>Числа перемножаем отдельно: ${nums.join(' · ')} = <b>${fmt(M.c)}</b>.</p>
+        <p>Одинаковые буквы — в одну степень:<br>${monoKeys(M).map(k => M.v[k] === 1
+          ? `${k} встречается 1 раз → ${k}`
+          : `${k} встречается ${pl(M.v[k], 'раз', 'раза', 'раз')} → ${k}<sup>${M.v[k]}</sup>`).join('<br>')}</p>
+        <p>Ответ: <b>${monoHtml(M)}</b></p>${monoHowTo(M)}
+        <p class="muted">Порядок букв роли не играет: ${monoHtml(M)} и ${monoHtml(M, monoKeys(M).reverse())} — один и тот же одночлен. А вот коэффициент всегда пишут первым.</p>
+        <p>Проверка при ${valsText(vals)}: ${shown} = ${fmt(target)} и ${monoHtml(M)} = ${fmt(evalMono(M, vals))} ✓</p>`
+    };
+  }
+
+  if (kind === 'coef') {
+    let M;
+    do { M = randMono(pick(MONO_LETTERS), pick([ri(2, 9), -ri(2, 9), 1, -1, 0.5, -0.25, 1.5, -ri(3, 7)]), [1, 2, 2, 3]); }
+    while (!monoKeys(M).length);
+    return {
+      q: `Назови коэффициент одночлена ${monoHtml(M)}.`,
+      answer: M.c,
+      predict: { label: 'Каким по знаку будет коэффициент?', options: ['положительный', 'отрицательный', 'ноль'], correct: signWord(M.c) },
+      diagnose(v) {
+        if (eq(v, -M.c)) return 'Знак — часть коэффициента: минус перед одночленом никуда не исчезает.';
+        if (eq(v, monoDeg(M))) return 'Ты назвал степень одночлена (сумму показателей букв). Коэффициент — это числовой множитель.';
+        if (eq(Math.abs(v), 1) && !eq(Math.abs(M.c), 1)) return 'Число видно в записи — бери его, а не 1.';
+        if (eq(Math.abs(M.c), 1)) return 'Если числа в записи нет, коэффициент всё равно есть: это 1 (или −1, если перед одночленом минус).';
+        return 'Коэффициент — числовой множитель. Он стоит впереди и берётся вместе со знаком.';
+      },
+      solution: `<p>Коэффициент — это число, на которое умножаются буквы. Оно стоит впереди и берётся со знаком.</p>
+        <p>${monoHtml(M)} = ${monoHtml({ c: M.c, v: {} })} · ${monoHtml({ c: 1, v: M.v })} → коэффициент <b>${fmt(M.c)}</b></p>
+        ${eq(Math.abs(M.c), 1) ? '<p class="muted">Число не пишут, когда оно 1: a²b — это 1 · a²b. Но коэффициент при этом есть — 1 (или −1 с минусом).</p>' : ''}`
+    };
+  }
+
+  if (kind === 'deg') {
+    if (Math.random() < 0.12) {
+      const ans = 'степень не определена';
+      return {
+        q: 'Какова степень одночлена 0?',
+        answer: ans, options: ['0', '1', ans], same: v => v === ans,
+        diagnose: () => 'У числа 0 нет букв, и показателей тоже нет — нельзя сложить. Про 0 говорят: степень не определена.',
+        solution: `<p>Степень — сумма показателей букв. В одночлене 0 букв нет, поэтому её сумму взять нельзя.</p>
+          <p>Ответ: <b>степень не определена</b>.</p>
+          <p class="muted">Любое другое число (5, −7, 0,25) — одночлен нулевой степени: букв нет, сумма показателей равна 0.</p>`
+      };
+    }
+    let M = randMono(pick(MONO_LETTERS), pick([ri(2, 27), -ri(2, 9), 0.5, 1]), [1, 1, 2, 2, 3, 4, 5]);
+    const d = monoDeg(M), keys = monoKeys(M);
+    const ones = keys.filter(k => M.v[k] === 1).length;
+    const mul = keys.reduce((s, k) => s * M.v[k], 1);
+    return {
+      q: `Какова степень одночлена ${monoHtml(M)}?`,
+      answer: d,
+      diagnose(v) {
+        if (eq(v, M.c)) return 'Коэффициент в степени не участвует: считают только показатели букв.';
+        if (keys.length && eq(v, mul) && mul !== d) return 'Показатели при нахождении степени <b>складывают</b>, а не перемножают.';
+        if (ones && eq(v, d - ones)) return `У буквы без показателя показатель 1 — её тоже нужно учесть. Таких букв ${ones}.`;
+        if (!d && eq(v, 1)) return 'Букв в одночлене нет — сумма показателей пуста, это 0, а не 1.';
+        return keys.length ? 'Степень одночлена — сумма показателей всех его букв.' : 'В одночлене нет букв — это число, его степень 0.';
+      },
+      solution: d === 0
+        ? `<p>В одночлене ${monoHtml(M)} нет букв — это число. Его степень считают <b>0</b>.</p>
+           <p class="muted">Только 0 — особенный: степень одночлена 0 не определена.</p>`
+        : `<p>Складываем показатели всех букв:<br>${keys.map(k => `${k}<sup>${M.v[k]}</sup> → ${M.v[k]}`).join('<br>')}</p>
+           <p>Степень: ${keys.map(k => M.v[k]).join(' + ')} = <b>${d}</b></p>
+           <p class="muted">Коэффициент ${fmt(M.c)} в расчёт не берётся.</p>`
+    };
+  }
+
+  if (kind === 'value') {
+    let M, vals;
+    do {
+      M = randMono(pick([['a', 'b'], ['x', 'y'], ['a', 'b', 'c']]), pick([ri(1, 4), -ri(1, 4), 0.5, -0.5, 1.5, 2.5, -0.25]), [1, 1, 2, 2, 3]);
+      vals = {};
+      for (const k of monoKeys(M)) vals[k] = pick([ri(1, 3), -ri(1, 3), ri(2, 3), -ri(1, 2)]);
+    } while (!monoKeys(M).length || Math.abs(evalMono(M, vals)) > 1500);
+    const ans = evalMono(M, vals);
+    const pow = k => Math.pow(vals[k], M.v[k]);
+    const line1 = `${par(M.c)} · ${monoKeys(M).map(k => M.v[k] === 1 ? par(vals[k]) : `${par(vals[k])}<sup>${M.v[k]}</sup>`).join(' · ')}`;
+    const line2 = `${par(M.c)} · ${monoKeys(M).map(k => fmt(pow(k))).join(' · ')}`;
+    const negPow = monoKeys(M).find(k => M.v[k] > 1 && vals[k] < 0);
+    const alt = round6(M.c * monoKeys(M).reduce((s, k) => s * vals[k] * M.v[k], 1));
+    return {
+      q: `Найди значение одночлена ${monoHtml(M)} при ${valsText(vals)}.`,
+      answer: ans,
+      predict: { label: 'Каким по знаку будет значение?', options: ['положительный', 'отрицательный', 'ноль'], correct: signWord(ans) },
+      ...(negPow ? { scaffold: { label: `Сначала степень: ${par(vals[negPow])}<sup>${M.v[negPow]}</sup> =`, answer: pow(negPow),
+                                hint: 'Основание в скобках — со знаком. Минус на минус даёт плюс, поэтому квадрат отрицательного числа положителен.' } } : {}),
+      diagnose(v) {
+        if (eq(v, -ans)) return 'Числа сошлись, а знак — нет. Посчитай по шагам: сначала степени, потом все умножения вместе с минусами.';
+        if (eq(v, alt)) return 'Степень — это не умножение на показатель: (−3)² = (−3) · (−3) = 9, а не −6.';
+        if (eq(v, ans / M.c)) return 'Ты потерял коэффициент: его тоже нужно умножить.';
+        return 'Подставляй числа в скобках, вместе со знаком: сначала вычисли степени, потом перемножь.';
+      },
+      solution: `<p>Подставляем числа — каждое в скобках, со знаком:</p><p>${line1}</p>
+        <p>Сначала степени:</p><p>${line2}</p>
+        <p>Ответ: <b>${fmt(ans)}</b></p>
+        ${negPow ? `<p class="muted">Обрати внимание: ${par(vals[negPow])}<sup>${M.v[negPow]}</sup> = ${fmt(pow(negPow))} — ${M.v[negPow] % 2 ? 'нечётная степень сохраняет знак' : 'в скобках минус, и он возводится в степень: минус на минус даёт плюс'}.</p>` : ''}`
+    };
+  }
+
+  const it = pick(MONO_FORMULAS);
+  return {
+    q: it.t,
+    answer: it.m, parseAns: parseMono, same: v => sameMono(v, it.m), wide: true,
+    inputHint: MONO_TYPE, formHint: 'одним одночленом: число впереди, затем буквы',
+    scaffold: { label: 'Сколько всего буквенных множителей в ответе? (В 4b — один, в ab — два.)',
+                answer: monoDeg(it.m),
+                hint: 'Буква, умноженная сама на себя три раза (a · a · a), — это три множителя и a³. А 4 · b — один буквенный множитель.' },
+    diagnose(v) {
+      if (it.wrong && sameMono(v, it.wrong)) return it.tip;
+      if (!monoKeys(v).length) return 'В ответе должна остаться буква: мы записываем зависимость, а не число.';
+      return 'Переведи слова в умножение: «в 3 раза больше» → 3 · a, «ребро три раза перемножить» → a · a · a = a³.';
+    },
+    solution: `<p>${it.tip}</p><p>Ответ: <b>${monoHtml(it.m)}</b></p>${monoHowTo(it.m)}
+      <p class="muted">Проверка: подставь любое число, например a = 2, в смысл задачи и в свой ответ — должно совпасть.</p>`
+  };
+}
+
+// ---------- multiplying monomials and raising them to a power (учебник, §7 п. 22) ----------
+function genMonoMul() {
+  const kind = pick(['mul', 'mul', 'mul', 'pow', 'pow', 'fill', 'deg']);
+  const letters = pick(MONO_LETTERS);
+
+  if (kind === 'mul') {
+    let M1, M2, P;
+    do {
+      M1 = randMono(letters, pick([ri(2, 9), ri(2, 9), -ri(2, 9), -ri(2, 9)]), [1, 1, 2, 2, 3, 4]);
+      M2 = randMono(letters, pick([ri(2, 9), ri(2, 9), -ri(2, 9)]), [1, 1, 2, 3]);
+      P = monoMul(M1, M2);
+    } while (!monoKeys(P).length || monoDeg(P) > 9);
+    const cOk = round6(M1.c * M2.c);
+    const vals = {};
+    for (const k of monoKeys(P)) vals[k] = pick([1, 2, 2, 3]);
+    const target = evalMono(P, vals);
+    const mulExp = { c: cOk, v: {} };
+    for (const k of monoKeys(P)) {
+      const e1 = M1.v[k] || 0, e2 = M2.v[k] || 0;
+      mulExp.v[k] = e1 && e2 ? e1 * e2 : (e1 || e2);
+    }
+    return {
+      q: monoProduct(M1, M2), expr: true,
+      answer: P, parseAns: parseMono, same: v => sameMono(v, P), wide: true,
+      inputHint: MONO_TYPE, formHint: 'число впереди, каждая буква — в одной степени',
+      scaffold: { label: `Сначала только числа: ${par(M1.c)} · ${par(M2.c)} =`, answer: cOk,
+                  hint: 'Коэффициенты перемножаются как обычные числа: минус на минус даёт плюс.' },
+      check: { label: `Проверь подстановкой (${valsText(vals)}): значение произведения =`, target,
+               compute: v => evalMono(v, vals) },
+      diagnose(v) {
+        if (sameMono(v, mulExp)) return 'Показатели при <b>умножении</b> складывают: a² · a⁴ = a⁶. Перемножают их тогда, когда степень возводят в степень.';
+        if (sameMono(v, { c: M1.c, v: P.v })) return `Буквы собраны верно, а числа не перемножены: ${par(M1.c)} · ${par(M2.c)} = ${fmt(cOk)}.`;
+        if (sameMono(v, { c: round6(M1.c + M2.c), v: P.v })) return 'Числа при умножении перемножают, а не складывают.';
+        if (sameMono(v, { c: -cOk, v: P.v })) return `Знак: ${par(M1.c)} · ${par(M2.c)} = ${fmt(cOk)}. Минус на минус — плюс, плюс на минус — минус.`;
+        return 'Перемножь числа отдельно, а каждую букву — с такой же буквой из другого множителя: показатели сложить.';
+      },
+      solution: `<p>Числа перемножаем отдельно:<br>${par(M1.c)} · ${par(M2.c)} = <b>${fmt(cOk)}</b></p>
+        <p>Буквы — по одной, показатели складываем:<br>${monoMulLines(M1, M2)}</p>
+        <p>Ответ: <b>${monoHtml(P)}</b></p>${monoHowTo(P)}
+        <p>Проверка при ${valsText(vals)}:<br>${par(evalMono(M1, vals))} · ${par(evalMono(M2, vals))} = ${fmt(target)} и ${monoHtml(P)} = ${fmt(evalMono(P, vals))} ✓</p>`
+    };
+  }
+
+  if (kind === 'pow') {
+    let M, n, R;
+    do {
+      n = pick([2, 2, 3, 3, 4]);
+      M = randMono(letters, pick([ri(2, n > 2 ? 3 : 5), -ri(2, n > 2 ? 3 : 5), ri(2, 3), -ri(2, 2)]), [1, 2, 2, 3]);
+      R = monoPow(M, n);
+    } while (!monoKeys(R).length || monoDeg(R) > 12 || Math.abs(R.c) > 250);
+    const vals = {};
+    for (const k of monoKeys(R)) vals[k] = pick([1, 2, 2, 3]);
+    const target = round6(Math.pow(evalMono(M, vals), n));
+    const cOk = round6(Math.pow(M.c, n));
+    const addExp = { c: cOk, v: Object.fromEntries(monoKeys(M).map(k => [k, M.v[k] + n])) };
+    return {
+      q: `${monoParen(M)}<sup>${n}</sup>`, expr: true,
+      answer: R, parseAns: parseMono, same: v => sameMono(v, R), wide: true,
+      inputHint: MONO_TYPE, formHint: 'число впереди, каждая буква — в одной степени',
+      scaffold: { label: `Сначала коэффициент: (${fmt(M.c)})<sup>${n}</sup> =`, answer: cOk,
+                  hint: `Это ${n} ${pl(n, 'множитель', 'множителя', 'множителей')}: ${Array(n).fill(`(${fmt(M.c)})`).join(' · ')}.` },
+      check: { label: `Проверь подстановкой (${valsText(vals)}): значение =`, target, compute: v => evalMono(v, vals) },
+      diagnose(v) {
+        if (sameMono(v, { c: M.c, v: R.v })) return 'Буквы возведены, а число забыто. В степень уходит <b>всё</b> в скобках: (2a)³ = 2³ · a³ = 8a³.';
+        if (sameMono(v, { c: -Math.pow(Math.abs(M.c), n), v: R.v }))
+          return `Знак решает чётность показателя: ${n} — ${n % 2 ? 'нечётный, минус остаётся' : 'чётный, минус исчезает'}. (${fmt(M.c)})<sup>${n}</sup> = ${fmt(cOk)}.`;
+        if (sameMono(v, addExp)) return 'Показатели при возведении степени в степень <b>перемножают</b>: (a²)³ = a<sup>2·3</sup> = a⁶, а не a<sup>2+3</sup>.';
+        return 'Возведи в степень и число, и каждую букву: у буквы показатель умножается на внешний.';
+      },
+      solution: `<p>Скобки означают, что в степень возводится всё внутри:<br>(${fmt(M.c)})<sup>${n}</sup> = ${fmt(cOk)}</p>
+        <p>У каждой буквы показатель умножается на ${n}:<br>${monoKeys(M).map(k => `(${k}<sup>${M.v[k]}</sup>)<sup>${n}</sup> = ${k}<sup>${M.v[k]}·${n}</sup> = ${k}<sup>${M.v[k] * n}</sup>`).join('<br>')}</p>
+        <p>Ответ: <b>${monoHtml(R)}</b></p>${monoHowTo(R)}
+        <p>Проверка при ${valsText(vals)}:<br>(${fmt(evalMono(M, vals))})<sup>${n}</sup> = ${fmt(target)} и ${monoHtml(R)} = ${fmt(evalMono(R, vals))} ✓</p>
+        <p class="muted">${n % 2 ? 'Показатель нечётный — знак коэффициента сохранился.' : 'Показатель чётный — минус внутри скобок исчезает.'}</p>`
+    };
+  }
+
+  if (kind === 'fill') {
+    let M1, M2, P;
+    do {
+      M1 = randMono(letters, pick([ri(2, 6), -ri(2, 4)]), [1, 2, 3]);
+      M2 = randMono(letters, pick([ri(2, 9), -ri(2, 9)]), [1, 1, 2, 3]);
+      P = monoMul(M1, M2);
+    } while (!monoKeys(M1).length || !monoKeys(P).length || monoDeg(P) > 9);
+    const vals = {};
+    for (const k of monoKeys(P)) vals[k] = pick([1, 2, 2, 3]);
+    const target = evalMono(P, vals);
+    const addExp = { c: M1.c, v: Object.fromEntries(monoKeys(P).map(k => [k, (P.v[k] || 0) + (M2.v[k] || 0)])) };
+    return {
+      q: `Какой одночлен надо умножить на ${monoHtml(M2)}, чтобы получилось ${monoHtml(P)}?`,
+      answer: M1, parseAns: parseMono, same: v => sameMono(v, M1), wide: true,
+      inputHint: MONO_TYPE, formHint: 'число впереди, каждая буква — в одной степени',
+      scaffold: { label: `Число: на что надо умножить ${par(M2.c)}, чтобы получить ${fmt(P.c)}?`, answer: M1.c,
+                  hint: `Неизвестный множитель находят делением: ${fmt(P.c)} : ${par(M2.c)}.` },
+      check: { label: `Проверь: умножь свой ответ на ${monoHtml(M2)} при (${valsText(vals)}). Значение =`, target,
+               compute: v => evalMono(monoMul(v, M2), vals) },
+      diagnose(v) {
+        if (sameMono(v, P)) return 'Ты записал само произведение. Искать нужно второй множитель: произведение разделить на известный множитель.';
+        if (sameMono(v, addExp)) return 'Показатели нужно <b>вычитать</b>: a⁶ : a² = a⁴. Складывают их при умножении.';
+        if (sameMono(v, { c: round6(P.c / M2.c), v: M2.v })) return 'Буквы взяты от известного множителя. А нужно отнять его показатели от показателей произведения.';
+        return 'Делим: числа — на числа, показатели — вычитаем. Проверь умножением.';
+      },
+      solution: `<p>Неизвестный множитель находят делением произведения на известный множитель:</p>
+        <p>${monoHtml(P)} : ${monoHtml(M2)} = ${fmt(P.c)} : ${par(M2.c)} = <b>${fmt(M1.c)}</b> — это коэффициент.</p>
+        <p>Показатели вычитаем:<br>${monoKeys(M1).map(k => `${k}<sup>${P.v[k]}</sup> : ${k}<sup>${M2.v[k] || 0}</sup> = ${k}<sup>${M1.v[k]}</sup>`).join('<br>')}</p>
+        <p>Ответ: <b>${monoHtml(M1)}</b></p>${monoHowTo(M1)}
+        <p>Проверка при ${valsText(vals)}: ${fmt(target)} : ${par(evalMono(M2, vals))} = ${fmt(evalMono(M1, vals))} ✓</p>`
+    };
+  }
+
+  let M1 = randMono(letters, pick([ri(2, 9), -ri(2, 6)]), [1, 2, 2, 3, 4]);
+  let M2 = randMono(letters, pick([ri(2, 9), -ri(2, 6)]), [1, 1, 2, 3]);
+  let P = monoMul(M1, M2);
+  while (!monoKeys(P).length || monoDeg(P) > 10 || !monoKeys(P).some(k => (M1.v[k] || 0) && (M2.v[k] || 0))) {
+    M1 = randMono(letters, pick([ri(2, 9), -ri(2, 6)]), [1, 2, 2, 3, 4]);
+    M2 = randMono(letters, pick([ri(2, 9), -ri(2, 6)]), [1, 1, 2, 3]);
+    P = monoMul(M1, M2);
+  }
+  const d = monoDeg(P);
+  const mulExp = monoKeys(P).reduce((s, k) => {
+    const e1 = M1.v[k] || 0, e2 = M2.v[k] || 0;
+    return s * (e1 && e2 ? e1 * e2 : (e1 || e2));
+  }, 1);
+  return {
+    q: `Какова степень одночлена, который получится при умножении ${monoProduct(M1, M2)}?`,
+    answer: d,
+    diagnose(v) {
+      if (eq(v, mulExp) && mulExp !== d) return 'Показатели при умножении складывают, а не перемножают.';
+      if (eq(v, d + Math.abs(M1.c * M2.c))) return 'Коэффициент в степень не входит — считают только показатели букв.';
+      return 'Сложи показатели всех букв получившегося одночлена: при умножении они складываются.';
+    },
+    solution: `<p>Соберём произведение:<br>${monoProduct(M1, M2)} = <b>${monoHtml(P)}</b></p>
+      <p>Степень — сумма показателей букв:<br>${monoKeys(P).map(k => (M1.v[k] || 0) + (M2.v[k] || 0)).join(' + ')} = <b>${d}</b></p>
+      <p class="muted">Заметь: степень произведения равна сумме степеней множителей — ${monoDeg(M1)} + ${monoDeg(M2)} = ${d}.</p>`
+  };
+}
+
+// ---------- y = x² and y = x³ and their graphs (учебник, §7 п. 23) ----------
+const SQ = { t: 'y = x<sup>2</sup>', name: 'y = x²', f: x => x * x, xr: 4, yr: 16 };
+const CUBE = { t: 'y = x<sup>3</sup>', name: 'y = x³', f: x => x * x * x, xr: 3, yr: 27 };
+const powLine = (x, w) => w === 'sq'
+  ? `${par(x)}<sup>2</sup> = ${Array(2).fill(par(x)).join(' · ')} = ${fmt(x * x)}`
+  : `${par(x)}<sup>3</sup> = ${Array(3).fill(par(x)).join(' · ')} = ${fmt(x * x * x)}`;
+
+function genSqCube() {
+  const kind = pick(['val', 'val', 'val', 'arg', 'arg', 'member', 'member', 'which', 'count', 'count', 'symm']);
+  const w = kind === 'which' ? pick(['sq', 'cube']) : pick(['sq', 'sq', 'cube']);
+  const F = w === 'sq' ? SQ : CUBE, f = F.f;
+  const pic = (pts = [], h = null) => curvePlot({ f, xr: F.xr, yr: F.yr, points: pts, h });
+
+  if (kind === 'val') {
+    const mx = w === 'sq' ? 4 : 3;
+    const x0 = pick([ri(-mx, -1), ri(1, mx), ri(-mx, mx), ri(1, mx)]);
+    const y0 = f(x0);
+    return {
+      q: `Функция задана формулой ${F.t}. Найди y при x = ${fmt(x0)}.`,
+      answer: y0,
+      predict: { label: 'Каким по знаку будет y?', options: ['положительный', 'отрицательный', 'ноль'], correct: signWord(y0) },
+      diagnose(v) {
+        if (eq(v, -y0)) return w === 'sq'
+          ? 'Квадрат отрицательным не бывает: (−4) · (−4) = 16. Другое дело −4² без скобок — там минус снаружи.'
+          : 'Куб сохраняет знак x: если x отрицательный, то и y отрицательный.';
+        if (w === 'sq' && eq(v, x0 * 2)) return 'x² — это x · x, а не 2x. Например (−4)² = (−4) · (−4) = 16.';
+        if (w === 'cube' && eq(v, x0 * 3)) return 'x³ — это x · x · x: (−2)³ = −8, а не −6.';
+        if (w === 'cube' && eq(v, x0 * x0)) return 'Ты возвёл в квадрат. Здесь три множителя: x · x · x.';
+        if (w === 'sq' && eq(v, x0 * x0 * x0)) return 'Это куб — он для y = x³. Тут только два множителя.';
+        return `Подставь x в скобках, вместе со знаком: ${powLine(x0, w)}.`;
+      },
+      solution: `<p>Формула — это рецепт: вместо x пишем ${par(x0)} — со знаком и в скобках.</p>
+        <p>y = ${powLine(x0, w)}</p>
+        <p>Ответ: <b>${fmt(y0)}</b></p>${pic([{ x: x0, y: y0 }])}
+        ${w === 'sq' ? '<p class="muted">Квадрат любого числа не меньше нуля — поэтому график y = x² не опускается под ось x.</p>'
+          : '<p class="muted">Куб сохраняет знак: при x &lt; 0 и y отрицательный, поэтому график y = x³ уходит вниз.</p>'}`
+    };
+  }
+
+  if (kind === 'arg') {
+    const mx = w === 'sq' ? 4 : 3;
+    const x0 = pick([ri(2, mx), -ri(2, mx)]), y0 = f(x0);
+    const ans = w === 'sq' ? Math.abs(x0) : x0;
+    return {
+      q: `Функция задана формулой ${F.t}. При каком ${w === 'sq' ? '<b>положительном</b> ' : ''}x значение y равно ${fmt(y0)}?`,
+      answer: ans,
+      check: { label: 'Проверь подстановкой. y =', target: y0, compute: v => round6(f(v)) },
+      diagnose(v) {
+        if (w === 'sq' && eq(v, -ans)) return `−${Math.abs(ans)} тоже подходит: (−${Math.abs(ans)})² = ${fmt(y0)}. Но в вопросе просят положительное число.`;
+        if (eq(v, y0)) return `${fmt(y0)} — это y. Нужно решить уравнение ${fmt(y0)} = ${F.t}.`;
+        if (w === 'sq' && eq(v, y0 / 2)) return 'x² = a не решается делением на 2. Нужно число, которое само на себя даёт a.';
+        return `Ищи число, которое ${w === 'sq' ? 'само на себя' : 'три раза само на себя'} даёт ${fmt(y0)}.`;
+      },
+      solution: w === 'sq'
+        ? `<p>Пишем уравнение: x<sup>2</sup> = ${fmt(y0)}.</p>
+           <p>Нужны числа, которые сами на себя дают ${fmt(y0)}: это ${fmt(ans)} и ${fmt(-ans)} — <b>два корня</b>
+           (${fmt(ans)} · ${fmt(ans)} = ${fmt(y0)} и (${fmt(-ans)}) · (${fmt(-ans)}) = ${fmt(y0)}).</p>
+           <p>По условию нужно положительное: <b>${fmt(ans)}</b></p>${pic([{ x: ans, y: y0 }, { x: -ans, y: y0 }])}
+           <p class="muted">Обе точки одной высоты — график симметричен относительно оси y.</p>`
+        : `<p>Пишем уравнение: x<sup>3</sup> = ${fmt(y0)}.</p>
+           <p>Три одинаковых множителя дают ${fmt(y0)} только у одного числа: <b>${fmt(ans)}</b>
+           (${Array(3).fill(par(ans)).join(' · ')} = ${fmt(y0)}).</p>
+           <p class="muted">У куба корень всегда один: (−2)³ = −8, а (+2)³ = 8 — это разные числа.</p>${pic([{ x: ans, y: y0 }])}`
+    };
+  }
+
+  if (kind === 'member') {
+    const mx = w === 'sq' ? 4 : 3;
+    const x0 = pick([ri(-mx, mx), ri(1, mx), -ri(1, mx)]);
+    const yTrue = f(x0);
+    const on = Math.random() < 0.5;
+    let yP = on ? yTrue : pick([w === 'sq' ? -Math.abs(yTrue) - 1 : -yTrue, yTrue + pick([-2, -1, 1, 2])]);
+    if (yP === yTrue) yP = yTrue + 1;
+    const ans = on ? 'да' : 'нет';
+    return {
+      q: `Принадлежит ли точка M(${fmt(x0)}; ${fmt(yP)}) графику функции ${F.t}?`,
+      answer: ans, options: YESNO, same: v => v === ans,
+      scaffold: { label: `Подставь x = ${fmt(x0)} в формулу. По формуле y =`, answer: yTrue,
+                  hint: w === 'sq' ? 'Пиши (−3)², а не −3²: скобки сохраняют минус, и квадрат получается положительным.'
+                    : 'Три множителя: (−2) · (−2) · (−2). Нечётное число минусов — ответ отрицательный.' },
+      diagnose: () => `При x = ${fmt(x0)} формула даёт y = ${fmt(yTrue)}, а у точки y = ${fmt(yP)}. ${on ? 'Совпало — точка лежит на графике.' : 'Не совпало — точка вне графика.'}`,
+      solution: `<p>Точка лежит на графике, если её координаты подходят под формулу. Подставляем x = ${fmt(x0)}:</p>
+        <p>y = ${powLine(x0, w)}</p>
+        <p>Формула даёт ${fmt(yTrue)}, у точки ${fmt(yP)}. ${on ? 'Совпадает — <b>лежит</b>.' : 'Не совпадает — <b>не лежит</b>.'}</p>
+        ${pic([{ x: x0, y: yTrue, color: '#2e8b57' }, { x: x0, y: yP, color: on ? '#2e8b57' : '#c0392b' }])}
+        ${!on && w === 'sq' && yP < 0 ? '<p class="muted">Короткий путь: у y = x² значение никогда не бывает отрицательным — такая точка не лежит на графике ни при каком x.</p>' : ''}`
+    };
+  }
+
+  if (kind === 'which') {
+    const opts = ['y = x²', 'y = x³', 'y = 2x'];
+    return {
+      q: `Какая функция задана этим графиком?<div>${pic([{ x: 1, y: f(1) }, { x: -1, y: f(-1) }, { x: 2, y: f(2) }])}</div>`,
+      answer: F.name, options: opts, same: v => v === F.name,
+      diagnose(v) {
+        if (v === 'y = 2x') return 'График y = 2x — прямая. Здесь линия изогнута, значит это не она.';
+        return w === 'sq' ? 'Смотри на левую половину: линия идёт вверх, точки (−2; 4) и (2; 4) одинаковой высоты.'
+          : 'Смотри на левую половину: при x &lt; 0 график идёт вниз — значит, y отрицательный.';
+      },
+      solution: w === 'sq'
+        ? `<p>Проверим по отмеченным точкам: при x = −2 получаем y = ${fmt(f(-2))}. Значит, это возведение в квадрат.</p>
+           <p>График не опускается под ось x и симметричен относительно оси y — это <b>парабола</b>, y = x².</p>${pic()}`
+        : `<p>Проверим по отмеченным точкам: при x = −2 получаем y = ${fmt(f(-2))} — значение отрицательное. Значит, это куб.</p>
+           <p>График идёт вниз слева и вверх справа, симметричен относительно начала координат — это <b>кубическая парабола</b>, y = x³.</p>${pic()}`
+    };
+  }
+
+  if (kind === 'count') {
+    const OPTS = ['ни одного', 'один', 'два'];
+    if (w === 'cube') {
+      const a = pick([1, 8, 27, -1, -8, -27]), root = Math.round(Math.cbrt(a));
+      return {
+        q: `Сколько корней имеет уравнение x<sup>3</sup> = ${fmt(a)}?`,
+        answer: 'один', options: OPTS, same: v => v === 'один',
+        diagnose: () => `Нужно число, которое три раза само на себя даёт ${fmt(a)}. Такое число только одно: ${fmt(root)}.`,
+        solution: `<p>x = ${par(root)}, потому что ${Array(3).fill(par(root)).join(' · ')} = ${fmt(a)}.</p>
+          <p>Другого числа нет: куб сохраняет знак, поэтому ${fmt(a)} дают ровно одним числом.</p>
+          <p>Ответ: <b>один корень</b>.</p>${pic([{ x: root, y: a }], a)}`
+      };
+    }
+    const a = pick([4, 9, 16, 1, 0, -1, -4, -9, -16]);   // всё влезает в рамку графика (yr = 16)
+    const n = a > 0 ? 2 : a === 0 ? 1 : 0, root = a > 0 ? Math.round(Math.sqrt(a)) : 0;
+    return {
+      q: `Сколько корней имеет уравнение x<sup>2</sup> = ${fmt(a)}?`,
+      answer: OPTS[n], options: OPTS, same: v => v === OPTS[n],
+      diagnose(v) {
+        if (a > 0 && v === OPTS[1]) return `Ты нашёл только ${fmt(root)}. Но и (${fmt(-root)})² = ${fmt(a)} — минус на минус даёт плюс.`;
+        if (a < 0 && v !== OPTS[0]) return 'Квадрат любого числа не меньше нуля. Отрицательного значения у x² не бывает — корней нет.';
+        if (a === 0 && v !== OPTS[1]) return 'x² = 0 только при x = 0. Единственный корень — сам ноль.';
+        return 'Посчитай на графике: сколько раз горизонтальная прямая y = ' + fmt(a) + ' пересекает параболу.';
+      },
+      solution: a > 0
+        ? `<p>Ищем числа, которые сами на себя дают ${fmt(a)}: это ${fmt(root)} и ${fmt(-root)}.</p>
+           <p>Проверка: ${fmt(root)} · ${fmt(root)} = ${fmt(a)} и (${fmt(-root)}) · (${fmt(-root)}) = ${fmt(a)} ✓</p>
+           <p>Ответ: <b>два корня</b>.</p>${pic([{ x: root, y: a }, { x: -root, y: a }], a)}`
+        : a === 0
+        ? `<p>x² = 0 только при x = 0 — других чисел нет.</p><p>Ответ: <b>один корень</b>.</p>${pic([{ x: 0, y: 0 }], 0)}`
+        : `<p>Квадрат не бывает отрицательным, поэтому x² = ${fmt(a)} не имеет корней.</p>
+           <p>На графике видно: пунктирная прямая y = ${fmt(a)} проходит ниже параболы и не пересекает её.</p>
+           <p>Ответ: <b>ни одного корня</b>.</p>${pic([], a)}`
+    };
+  }
+
+  const smax = w === 'sq' ? 4 : 3;
+  const x0 = pick([ri(1, smax), -ri(1, smax)]), y0 = f(x0);
+  const about = w === 'sq' ? 'оси y' : 'начала координат';
+  const askX = w === 'sq';
+  const ans = askX ? -x0 : -y0;
+  return {
+    q: `Точка A(${fmt(x0)}; ${fmt(y0)}) лежит на графике ${F.t}. Какая точка этого графика симметрична ей относительно ${about}? Впиши ${askX ? 'её x-координату' : 'её y-координату'}.`,
+    answer: ans,
+    predict: { label: 'Каким по знаку будет это число?', options: ['положительный', 'отрицательный', 'ноль'], correct: signWord(ans) },
+    diagnose(v) {
+      if (eq(v, x0)) return `Ты взял ту же точку. Симметричная — с ${askX ? 'другой стороны оси y' : 'противоположного конца графика'}.`;
+      if (askX && eq(v, y0)) return `${fmt(y0)} — это y точки A. Нужна x-координата: то же число, но с другим знаком.`;
+      if (!askX && eq(v, -x0)) return 'У куба меняются обе координаты. Нужна y-координата: это −y, а не −x.';
+      return askX ? 'Симметрия относительно оси y: x меняет знак, y остаётся тем же.'
+        : 'Симметрия относительно начала координат: меняются знаком обе координаты.';
+    },
+    solution: askX
+      ? `<p>Квадрат не чувствует знака: (${fmt(-x0)})² = ${fmt(x0)}² = ${fmt(y0)}. Значит, точка (${fmt(-x0)}; ${fmt(y0)}) тоже на графике.</p>
+         <p>Она — зеркальное отражение A относительно оси y: <b>x = ${fmt(ans)}</b>.</p>
+         ${pic([{ x: x0, y: y0 }, { x: -x0, y: y0 }])}`
+      : `<p>Куб меняет знак вместе с x: ${par(-x0)}<sup>3</sup> = ${fmt(-y0)}. Значит, точка (${fmt(-x0)}; ${fmt(-y0)}) тоже на графике.</p>
+         <p>Она симметрична A относительно начала координат: <b>y = ${fmt(ans)}</b>.</p>
+         ${pic([{ x: x0, y: y0 }, { x: -x0, y: -y0 }])}`
+  };
+}
 
 // ---------- number intervals ----------
 function intervalLine(a, b, L, R) {
@@ -1410,6 +2079,162 @@ const MODULES = [
         <li><b>−3<sup>2</sup> = −9:</b> без скобок в степени только число.</li>
         <li>Чётное число минусов — плюс, нечётное — минус.</li></ul>` },
     oops: [['(−3)² = −9', 'Распиши: (−3) · (−3). Минус на минус — плюс: <b>9</b>. Петя ведь знает, что (−4) · (−6) = 24 — это то же самое.']] },
+  { id: 'mono', title: 'Одночлен и его стандартный вид', short: 'Одночлены', gen: genMono,
+    lesson: {
+      hook: 'Одночлен — это <b>один кусок</b>: число, буква или их произведение. Стоит появиться сложению — это уже другой объект, многочлен. Разберём, из чего одночлен состоит и как записать его удобно.',
+      examples: [
+        { title: 'что такое одночлен', problem: 'Что общего у 7, a и 3x²y?', steps: [
+          { math: '7 — число. &nbsp; a — буква. &nbsp; 3x²y — 3 · x · x · y.', why: 'Всё это <b>произведение</b> чисел и букв. Такая запись и называется <b>одночленом</b>: «один член», одна часть.' },
+          { think: true, math: 'x + 5 — уже <b>не</b> одночлен', why: 'Здесь сложение: две части. Сумма одночленов называется <b>многочленом</b>.' },
+          { math: '12 − a — не одночлен, &nbsp; 12 · a = 12a — одночлен', why: 'Смотри на <b>действие</b>, а не на буквы: деление на букву (x : y) тоже не подходит.' },
+          { try: { label: 'Что из этого одночлен? Ответь словом «да» или «нет»: a² + b²', parse: parseWord, same: v => v === 'нет',
+                   inputHint: 'Ответь словом: да или нет.',
+                   hint: 'Между a² и b² стоит плюс — это сумма двух одночленов, многочлен.' },
+            math: 'a² + b² — не одночлен (сумма)', why: 'А вот a² · b² = a²b² — одночлен: здесь только умножение.' }] },
+        { title: 'коэффициент и степень', problem: '−5a³b². Что в нём число, что буквы?', steps: [
+          { math: 'Коэффициент: <b>−5</b>', why: 'Коэффициент — это числовой множитель. Он стоит <b>впереди</b> и берётся <b>вместе со знаком</b>.' },
+          { math: 'Буквы: a в степени 3, b в степени 2', why: 'a³ — это a · a · a. Показатель говорит, сколько раз буква умножается сама на себя.' },
+          { math: 'Степень одночлена: 3 + 2 = <b>5</b>', why: '<b>Степень — сумма показателей всех букв.</b> Коэффициент в неё не входит.' },
+          { try: { label: 'Какова степень одночлена 7x²y⁴?', answer: 6, hint: 'Сложи показатели букв: 2 + 4. Число 7 не участвует.' },
+            math: 'Степень 7x²y⁴ = 6' },
+          { try: { label: 'Назови коэффициент одночлена −a²b.', answer: -1,
+                   hint: 'Если число не написано, оно всё равно есть: 1. А минус перед одночленом — это −1.' },
+            math: 'Коэффициент −a²b равен −1', why: '−a²b = (−1) · a² · b. То же самое: a²b имеет коэффициент 1.' }] },
+        { title: 'стандартный вид', problem: 'Приведём 3 · a · 2b · a к стандартному виду', steps: [
+          { try: { label: 'Перемножь только числа: 3 · 2 =', answer: 6, hint: 'Числовые множители собираем в один: 3 · 2 = 6.' },
+            math: 'Числа: 3 · 2 = 6' },
+          { try: { label: 'Сколько всего множителей a в записи 3 · a · 2b · a?', answer: 2, hint: 'a встречается дважды → a · a = a².' },
+            math: 'Буквы: a · a = a², &nbsp; b — один раз' },
+          { try: { label: 'Собери ответ: число впереди, затем буквы.', parse: parseMono, same: v => sameMono(v, { c: 6, v: { a: 2, b: 1 } }),
+                   inputHint: 'Запиши одночлен так: 6a^2b (можно и 6a2b). Число впереди, буквы латинские.',
+                   hint: 'Получается 6 · a² · b. Число всегда пишут первым.' },
+            math: 'Ответ: <b>6a²b</b>', why: 'Это и есть <b>стандартный вид</b>: коэффициент впереди, каждая буква — в одной степени. Порядок букв роли не играет: 6a²b и 6ba² — одно и то же.' }] },
+        { title: 'значение одночлена', problem: 'Найди значение −2x²y при x = −3, y = 4', steps: [
+          { think: true, math: '−2 · (−3)² · 4', why: 'Число подставляем <b>в скобках</b>, вместе с минусом. Это главное правило подстановки.' },
+          { try: { label: 'Сначала степень: (−3)² =', answer: 9, hint: '(−3) · (−3) — минус на минус даёт плюс.' },
+            math: '(−3)² = 9' },
+          { try: { label: 'Теперь всё перемножь: −2 · 9 · 4 =', answer: -72, hint: '2 · 9 · 4 = 72, а минус снаружи даёт −72.' },
+            math: '−2 · 9 · 4 = −72', why: 'Один минус в произведении — ответ отрицательный. Проверить всегда можно тем же подставлением по шагам.' }] },
+        { title: 'текст → одночлен', problem: 'Сторона квадрата равна 3a. Запиши его площадь', steps: [
+          { math: 'S = сторона · сторона = 3a · 3a', why: 'Квадрат — это сторона, умноженная на такую же сторону.' },
+          { try: { label: 'Выполни умножение: 3a · 3a =', parse: parseMono, same: v => sameMono(v, { c: 9, v: { a: 2 } }),
+                   reject: v => sameMono(v.value, { c: 3, v: { a: 2 } }) ? 'Числа тоже нужно перемножить: 3 · 3 = 9, а не оставить 3.' : null,
+                   inputHint: 'Запиши одночлен: 9a^2 (можно 9a2).', hint: 'Числа с числами (3 · 3), буквы с буквами (a · a).' },
+            math: 'S = 9a²', why: 'Ошибка «3a²» — самая частая в этой теме: забывают, что <b>3 · 3 = 9</b>.' }] }],
+      rule: `<ul><li><b>Одночлен</b> — произведение чисел и букв в натуральных степенях. Сложения и деления на букву внутри нет.</li>
+        <li><b>Стандартный вид:</b> коэффициент впереди, каждая буква — в одной степени. Порядок букв не важен.</li>
+        <li><b>Коэффициент</b> — числовой множитель, со знаком. Если числа не написано — это 1 (с минусом −1).</li>
+        <li><b>Степень</b> — сумма показателей всех букв; коэффициент не считается. Число (не 0) имеет степень 0, а у 0 степень не определена.</li>
+        <li><b>Значение</b>: подставь числа в скобках со знаком, сначала степени, потом умножения.</li></ul>` },
+    oops: [['x + 5 — одночлен', 'В одночлене только умножение. x + 5 — сумма, это многочлен. А вот x · 5 = 5x — одночлен.'],
+           ['3a · 3a = 3a²', 'Числа перемножаются отдельно: 3 · 3 = 9 → <b>9a²</b>. Проверь числами: при a = 2 сторона 6, площадь 36; а 3a² дало бы 12.'],
+           ['Степень одночлена −5a³b² равна 3 · 2 = 6', 'Показатели <b>складывают</b>: 3 + 2 = <b>5</b>. Перемножают показатели, когда степень возводят в степень.'],
+           ['−2x²y при x = −3: −2 · (−3)² · 4 = 72', '(−3)² = 9, дальше −2 · 9 · 4 = <b>−72</b>. Минус у двойки никуда не делся — он часть коэффициента.']] },
+  { id: 'monomul', title: 'Умножение одночленов. Возведение в степень', short: 'Умножение одночленов', gen: genMonoMul,
+    lesson: {
+      hook: 'Два правила — и вся тема: при <b>умножении</b> показатели складываются, при <b>возведении в степень</b> — перемножаются. Остальное — арифметика коэффициентов.',
+      examples: [
+        { title: 'разбираем вместе (учебник, пример 1)', problem: '5a²bc · 4a²b⁴ = ?', steps: [
+          { think: true, math: 'Числа отдельно, буквы отдельно: (5 · 4) · (a² · a²) · (b⁴ · b) · c', why: 'Умножение можно переставлять как удобно — это свойства умножения, они работают и с буквами.' },
+          { try: { label: 'Коэффициент: 5 · 4 =', answer: 20, hint: 'Обычное умножение чисел.' }, math: '5 · 4 = 20' },
+          { try: { label: 'a² · a² = a в какой степени?', answer: 4, hint: 'Показатели складывают: 2 + 2 = 4.' },
+            math: 'a² · a² = a<sup>2+2</sup> = a⁴', why: 'Проверим: (a · a) · (a · a) — всего четыре множителя a.' },
+          { math: 'b⁴ · b = b⁵', why: 'У буквы без показателя показатель <b>1</b>: b⁴ · b¹ = b⁵.' },
+          { try: { label: 'Собери ответ: число, потом a, b, c по порядку.', parse: parseMono,
+                   same: v => sameMono(v, { c: 20, v: { a: 4, b: 5, c: 1 } }),
+                   inputHint: 'Запиши так: 20a^4b^5c (можно 20a4b5c).', hint: 'Коэффициент 20, a⁴, b⁵ и c в первой степени.' },
+            math: 'Ответ: <b>20a⁴b⁵c</b>' },
+          { math: 'Проверка при a = 2, b = 1, c = 3:<br>(5 · 4 · 1 · 3) · (4 · 4 · 1) = 60 · 16 = 960<br>20 · 16 · 1 · 3 = 960 ✓',
+            why: 'Значение исходного произведения и значение ответа совпали — умножение выполнено верно. Так проверяют любое преобразование.' }] },
+        { title: 'со знаками', problem: '−6a²b · (−10ab²) = ?', steps: [
+          { try: { label: 'Знак и коэффициент: (−6) · (−10) =', answer: 60, hint: 'Минус на минус — плюс.' }, math: '(−6) · (−10) = 60' },
+          { math: 'a² · a = a³, &nbsp; b · b² = b³', why: 'Каждую букву — с такой же буквой, показатели складываем.' },
+          { try: { label: 'Ответ:', parse: parseMono, same: v => sameMono(v, { c: 60, v: { a: 3, b: 3 } }),
+                   inputHint: 'Запиши так: 60a^3b^3.', hint: 'Коэффициент 60, дальше a³ и b³.' },
+            math: 'Ответ: <b>60a³b³</b>' }] },
+        { title: 'возведение в степень (учебник, пример 2)', problem: '(−2a²b)³ = ?', steps: [
+          { math: '(−2a²b)³ = (−2a²b) · (−2a²b) · (−2a²b)', why: 'Скобки — значит, в куб уходит <b>всё</b> внутри: и число, и каждая буква.' },
+          { try: { label: 'Коэффициент: (−2)³ =', answer: -8, hint: '(−2) · (−2) · (−2). Нечётное число минусов — ответ отрицательный.' },
+            math: '(−2)³ = −8' },
+          { try: { label: '(a²)³ = a в какой степени?', answer: 6, hint: 'Здесь показатели <b>перемножают</b>: 2 · 3 = 6.' },
+            math: '(a²)³ = a<sup>2·3</sup> = a⁶' },
+          { math: '(b)³ = b³', why: 'У b показатель 1: 1 · 3 = 3.' },
+          { try: { label: 'Ответ:', parse: parseMono, same: v => sameMono(v, { c: -8, v: { a: 6, b: 3 } }),
+                   inputHint: 'Запиши так: -8a^6b^3.', hint: '−8, затем a⁶ и b³.' },
+            math: 'Ответ: <b>−8a⁶b³</b>' },
+          { math: 'Сравни с учебником: (−x³y²)⁴ = x¹²y⁸', why: 'Показатель 4 — <b>чётный</b>, поэтому минус внутри скобок исчез: (−1)⁴ = 1. А при нечётном показателе (как куб выше) минус остаётся.' }] },
+        { title: 'твоя очередь', problem: '(−5x²)³ = ?', steps: [
+          { try: { label: 'Коэффициент: (−5)³ =', answer: -125, hint: '(−5) · (−5) · (−5) = 25 · (−5).' }, math: '(−5)³ = −125' },
+          { try: { label: '(x²)³ = x^…', answer: 6, hint: 'Показатели перемножаются: 2 · 3.' }, math: '(x²)³ = x⁶' },
+          { try: { label: 'Ответ:', parse: parseMono, same: v => sameMono(v, { c: -125, v: { x: 6 } }),
+                   inputHint: 'Запиши так: -125x^6.', hint: '−125 и x в шестой степени.' },
+            math: 'Ответ: <b>−125x⁶</b>', why: 'Обрати внимание: число 5 тоже возвелось в куб. (2a)³ = 8a³ — всегда и число, и буква.' }] },
+        { title: 'как в школьных примерах', problem: '4a²b · (−3ab³) = ?', steps: [
+          { think: true, math: '4 · (−3) = −12', why: 'Плюс на минус — минус.' },
+          { think: true, math: 'a² · a = a³, &nbsp; b · b³ = b⁴', why: 'Показатели складываем: 2 + 1 и 1 + 3.' },
+          { try: { label: 'Ответ:', parse: parseMono, same: v => sameMono(v, { c: -12, v: { a: 3, b: 4 } }),
+                   inputHint: 'Запиши так: -12a^3b^4.', hint: '−12a³b⁴.' },
+            math: 'Ответ: <b>−12a³b⁴</b>' }] }],
+      rule: `<ul><li><b>Числа перемножай отдельно, буквы — с такими же буквами.</b></li>
+        <li><b>a<sup>m</sup> · a<sup>n</sup> = a<sup>m+n</sup></b> — при умножении показатели складываются.</li>
+        <li><b>(a<sup>m</sup>)<sup>n</sup> = a<sup>m·n</sup></b> — при возведении в степень показатели перемножаются.</li>
+        <li>В степень уходит <b>и коэффициент</b>: (2a)³ = 8a³. Чётный показатель убирает минус, нечётный оставляет.</li>
+        <li>Проверка: подставь числа в множители и в ответ — значения должны совпасть.</li></ul>` },
+    oops: [['5a² · 4a³ = 20a⁶', 'Показатели при умножении складывают: a² · a³ = a⁵ → <b>20a⁵</b>. Перемножают их только при возведении степени в степень.'],
+           ['(2a)³ = 2a³', 'Число тоже возводится: 2 · 2 · 2 = 8 → <b>8a³</b>.'],
+           ['(−3x²)² = −9x⁴', 'Показатель 2 — чётный: (−3) · (−3) = 9 → <b>9x⁴</b>. Минус исчезает.'],
+           ['a · a = 2a', 'a · a = <b>a²</b>. А 2a — это a + a: при сложении показатель не появляется.']] },
+  { id: 'sqcube', title: 'Функции y = x² и y = x³ и их графики', short: 'y = x², y = x³', gen: genSqCube,
+    lesson: {
+      hook: 'Квадрат и куб числа ты уже считать умеешь. Оказывается, из них получаются два очень разных графика: <b>парабола</b> — чашечкой вверх, и <b>кубическая парабола</b> — которая идёт вниз слева и вверх справа.',
+      examples: [
+        { title: 'формула — это рецепт', problem: 'y = x². Найди y при x = −4, x = 0 и x = 3', steps: [
+          { math: 'Рецепт: «возьми число и умножь само на себя».', why: 'Так читается y = x². x² — это не 2x, а x · x.' },
+          { try: { label: 'x = −4: y = (−4)² =', answer: 16, hint: '(−4) · (−4) — минус на минус даёт плюс. Пиши в скобках!' },
+            math: '(−4)² = (−4) · (−4) = 16' },
+          { try: { label: 'x = 3: y = 3² =', answer: 9, hint: '3² — это 3 · 3, не 3 · 2 и не 3 + 3.' }, math: '3² = 9, &nbsp; 0² = 0' },
+          { math: 'Вывод: y = x² <b>никогда не бывает отрицательным</b>', why: 'Квадрат любого числа ≥ 0. Поэтому график y = x² не опускается под ось x — он «чашечкой» вверх.',
+            pic: curvePlot({ f: x => x * x, xr: 4, yr: 16, points: [{ x: -4, y: 16 }, { x: 3, y: 9 }] }) }] },
+        { title: 'куб сохраняет знак', problem: 'y = x³ при x = −2 и при x = 2', steps: [
+          { try: { label: '(−2)³ =', answer: -8, hint: '(−2) · (−2) · (−2): сначала 4, потом 4 · (−2).' },
+            math: '(−2)³ = (−2) · (−2) · (−2) = −8' },
+          { math: '(2)³ = 8', why: '<b>Нечётное число минусов — ответ отрицательный.</b> Куб, в отличие от квадрата, сохраняет знак x.' },
+          { math: 'Поэтому y = x³ идёт вниз слева и вверх справа', why: 'При x &lt; 0 и y &lt; 0. График симметричен не относительно оси, а относительно <b>начала координат</b>.',
+            pic: curvePlot({ f: x => x * x * x, xr: 3, yr: 27, points: [{ x: -2, y: -8 }, { x: 2, y: 8 }] }) }] },
+        { title: 'составим таблицу и построим', problem: 'y = x², x от −3 до 3', steps: [
+          { math: '<table class="t"><tr><th>x</th><th>−3</th><th>−2</th><th>−1</th><th>0</th><th>1</th><th>2</th><th>3</th></tr><tr><td>y = x²</td><td>9</td><td>4</td><td>1</td><td>0</td><td>1</td><td>4</td><td>9</td></tr></table>',
+            why: 'Значения при x = −2 и x = 2 <b>одинаковые</b>: 4. Значит, точки одной высоты.' },
+          { math: 'Отмечаем точки и получаем параболу', why: 'Вершина — в начале координат, точка (0; 0). Ось y — зеркало: левая половина — отражение правой.',
+            think: true,
+            pic: curvePlot({ f: x => x * x, xr: 4, yr: 16, points: [-3, -2, -1, 0, 1, 2, 3].map(x => ({ x, y: x * x, hide: Math.abs(x) < 3 })) }) },
+          { math: 'y = x³ — таблица другая', why: 'Тут значения при −x противоположны значениям при x: (−2)³ = −8, а 2³ = 8.',
+            pic: curvePlot({ f: x => x * x * x, xr: 3, yr: 27, points: [-2, -1, 0, 1, 2].map(x => ({ x, y: x * x * x })) }) }] },
+        { title: 'твоя очередь', problem: 'Лежит ли точка A(−3; 9) на графике y = x²? А точка B(−3; −9)?', steps: [
+          { try: { label: 'Посчитай y по формуле при x = −3: y =', answer: 9, hint: '(−3)² = 9 — квадрат отрицательного числа положителен.' },
+            math: 'y = (−3)² = 9' },
+          { math: 'A(−3; 9) — <b>лежит</b>: y совпало', why: 'Точка принадлежит графику, если её координаты подходят под формулу.' },
+          { try: { label: 'B(−3; −9): лежит на графике или нет? Ответь словом «да» или «нет».', parse: parseWord, same: v => v === 'нет',
+                   inputHint: 'Ответь словом: да или нет.',
+                   hint: 'y = x² не бывает отрицательным, а у точки y = −9.' },
+            math: 'B(−3; −9) — <b>не</b> лежит: формула даёт 9, а не −9',
+            pic: curvePlot({ f: x => x * x, xr: 4, yr: 16, points: [{ x: -3, y: 9, color: '#2e8b57' }, { x: -3, y: -9, color: '#c0392b' }] }) }] },
+        { title: 'сколько корней?', problem: 'x² = 16, x³ = 8, x² = −9', steps: [
+          { math: 'x² = 16 → x = 4 <b>и</b> x = −4', why: 'Квадрат дают оба числа: 4 · 4 = 16 и (−4) · (−4) = 16. <b>Два корня</b> — это две точки одной высоты на параболе.' },
+          { try: { label: 'Сколько корней у x³ = 8?', parse: parseWord, same: v => v === 'один' || v === '1',
+                   inputHint: 'Сколько — словом: «один», «два» или «ни одного».',
+                   hint: 'Только 2: 2³ = 8, а (−2)³ = −8 — это уже другое число.' },
+            math: 'x³ = 8 → x = 2, корень <b>один</b>', why: 'Куб сохраняет знак, поэтому подходящее число ровно одно.' },
+          { math: 'x² = −9 → <b>корней нет</b>', why: 'Квадрат не бывает отрицательным. На графике это горизонтальная прямая ниже параболы — пересечений нет.',
+            pic: curvePlot({ f: x => x * x, xr: 4, yr: 16, h: -9 }) }] }],
+      rule: `<ul><li><b>y = x² — парабола.</b> y не отрицательный, вершина (0; 0), симметрия относительно оси y.</li>
+        <li><b>y = x³ — кубическая парабола.</b> y сохраняет знак x, симметрия относительно начала координат.</li>
+        <li>Подставляй x <b>в скобках</b>, со знаком: (−4)² = 16, а −4² = −16.</li>
+        <li><b>Точка на графике</b> — если её координаты подходят под формулу: подставь x и сравни y.</li>
+        <li><b>Корни:</b> x² = a при a &gt; 0 — два корня (±), при a = 0 — один, при a &lt; 0 — ни одного. x³ = a — всегда один.</li></ul>` },
+    oops: [['(−5)² = −25', 'Минус в скобках тоже возводится: (−5) · (−5) = <b>25</b>. Отрицательным бывает −5² без скобок — там минус снаружи.'],
+           ['x² = 16, значит x = 4', 'И −4 тоже подходит: (−4)² = 16. Корней <b>два</b>: 4 и −4.'],
+           ['Точка (−2; 4) не лежит на y = x², потому что x отрицательный', 'Знак x не важен: (−2)² = 4 — совпало с y точки, значит точка <b>лежит</b>.'],
+           ['y = x³ при x = −2 равно 8', '(−2)³ = (−2) · (−2) · (−2) = <b>−8</b>. Куб сохраняет знак, в отличие от квадрата.']] },
   { id: 'dmul', title: 'Умножение десятичных дробей', short: 'Дес. умножение', gen: genDecMul,
     lesson: {
       hook: 'Умножать десятичные дроби легко: считаем как целые числа, а потом ставим запятую. Главное — понять, <b>куда</b>.',
@@ -1543,7 +2368,7 @@ const SECTIONS = [
   { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
   { title: 'Учебник, глава 1. Выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
   { title: 'Учебник, глава 2. Функции', ids: ['fn'] },
-  { title: 'Учебник, глава 3. Степень с натуральным показателем', ids: ['pow'] },
+  { title: 'Учебник, глава 3. Степень с натуральным показателем', ids: ['pow', 'mono', 'monomul', 'sqcube'] },
   { title: 'Из учебника 8 класса', ids: ['int'] },
 ];
 SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
