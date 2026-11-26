@@ -77,6 +77,9 @@
   .streak { display: flex; gap: 4px; margin-top: 6px; }
   .streak span { width: 18px; height: 18px; border-radius: 50%; background: var(--line); }
   .streak span.on { background: var(--ok); }
+  #hud { max-width: 820px; margin: 0 auto; padding: 10px 16px 0; display: flex; gap: 4px 18px;
+         flex-wrap: wrap; justify-content: flex-end; font-size: 16px; color: var(--muted); }
+  #hud b { color: var(--ink); font-weight: 700; }
   .fr { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center;
         font-size: .85em; margin: 0 2px; line-height: 1.15; }
   .fr > span:first-child { border-bottom: 1.5px solid currentColor; padding: 0 3px; }
@@ -103,6 +106,7 @@
 </style>
 </head>
 <body>
+<div id="hud"></div>
 <main id="app"></main>
 
 <script>
@@ -2495,18 +2499,79 @@ SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id)
 // ---------- storage ----------
 const KEY = 'algebra7-trainer-v1';
 let store = JSON.parse(localStorage.getItem(KEY) || '{}');
-store.stats = store.stats || {};
-store.log = store.log || [];
-store.lessons = store.lessons || {};
-store.grade = store.grade === 8 ? 8 : 7; // which класс tab was last open
-const save = () => localStorage.setItem(KEY, JSON.stringify(store));
-const today = () => new Date().toISOString().slice(0, 10);
-function st(id) {
-  return store.stats[id] || (store.stats[id] = { solved: 0, firstTry: 0, sure: 0, sureWrong: 0, selfCaught: 0, streak: 0, mastered: [] });
+// The blob is a boundary: it survives versions, check runs and hand edits, and one bad
+// value poisons the derived totals (NaN in the strip) or throws inside save().
+function normalizeStore(s = store) {
+  s.stats = s.stats && typeof s.stats === 'object' && !Array.isArray(s.stats) ? s.stats : {};
+  s.log = Array.isArray(s.log) ? s.log : [];
+  s.lessons = s.lessons && typeof s.lessons === 'object' ? s.lessons : {};
+  s.days = s.days && typeof s.days === 'object' ? s.days : {};
+  s.mixesDone = Number(s.mixesDone) || 0;
+  s.grade = s.grade === 8 ? 8 : 7; // anything else hides every topic card
+  for (const id of Object.keys(s.stats)) {
+    const t = s.stats[id];
+    if (!t || typeof t !== 'object') { delete s.stats[id]; continue; }
+    t.mastered = Array.isArray(t.mastered) ? t.mastered : [];
+    for (const k of ['solved', 'firstTry', 'sure', 'sureWrong', 'selfCaught', 'streak', 'series', 'helped']) t[k] = Number(t[k]) || 0;
+  }
+  for (const d of Object.keys(s.days)) {
+    const r = s.days[d];
+    s.days[d] = r && typeof r === 'object' ? { n: Number(r.n) || 0, secs: Number(r.secs) || 0 } : { n: 0, secs: 0 };
+  }
+  return s;
 }
+normalizeStore();
+let secsDirty = false; // seconds counted but not written yet
+const save = () => { secsDirty = false; localStorage.setItem(KEY, JSON.stringify(store)); renderHud(); };
+// The child's own calendar day, not the UTC one: an evening session must not be filed
+// under tomorrow (that also decides which day a streak breaks).
+const isoDay = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const today = () => isoDay(new Date());
+const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return today() + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+function st(id) {
+  return store.stats[id] || (store.stats[id] = { solved: 0, firstTry: 0, sure: 0, sureWrong: 0, selfCaught: 0, streak: 0, series: 0, mastered: [] });
+}
+
+// ---------- progress ----------
+// Points are derived, never stored: every number below only grows, so the total cannot
+// drift out of sync with the counters and a scheme change needs no migration.
+const PTS = { theory: 20, series: 30, caught: 5, mix: 50 };
+const dayRec = () => store.days[today()] || (store.days[today()] = { n: 0, secs: 0 });
+const dayN = () => (store.days[today()] || {}).n || 0;
+const points = (o = store) => Object.keys(o.lessons || {}).length * PTS.theory + (o.mixesDone || 0) * PTS.mix
+  + Object.values(o.stats || {}).reduce((p, s) => p + (s.series || 0) * PTS.series + (s.selfCaught || 0) * PTS.caught, 0);
+// A day counts as studied with a solved task or five real minutes inside a topic — an
+// open tab doing nothing must not build a streak.
+const secsTotal = () => Object.values(store.days).reduce((s, d) => s + (d.secs || 0), 0);
+const studied = d => { const r = store.days[d]; return !!r && (r.n > 0 || r.secs >= 300); };
+function dayStreak() {
+  const d = new Date();
+  if (!studied(isoDay(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (studied(isoDay(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+const hm = s => { const h = Math.floor(s / 3600), m = Math.round((s - h * 3600) / 60);
+  return s < 60 ? 'меньше минуты' : m === 60 ? (h + 1) + ' ч' : h && !m ? h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 
 const app = document.getElementById('app');
 let session = null; // { mod, task, tries, conf, caught, mixLeft, mixDone, mixRight }
+
+// ---------- hud ----------
+// Shown on every screen on purpose: toggling it would shift content under a scrollIntoView.
+// The observer covers navigation, save() covers counters — feedback() does not rewrite #app.
+const hud = document.getElementById('hud');
+function renderHud() {
+  hud.innerHTML = `★ <b>${points()}</b> · сегодня решено <b>${dayN()}</b> · дней подряд <b>${dayStreak()}</b>`;
+}
+new MutationObserver(renderHud).observe(app, { childList: true });
+// Time is counted only inside a topic while the tab is visible, so an open tab overnight
+// does not add hours. The tick never writes: a periodic save would let a second idle window
+// overwrite the live one, and a save on unload would write back whatever the tab happens to
+// hold in memory. Only unsaved seconds get flushed, when the tab goes away.
+setInterval(() => { if (session && document.visibilityState === 'visible') { dayRec().secs += 10; secsDirty = true; } }, 10000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && secsDirty) save(); });
+addEventListener('pagehide', () => { if (secsDirty) save(); });
 
 // ---------- screens ----------
 function home() {
@@ -2528,6 +2593,10 @@ function home() {
       </ul>
       ${sure ? `<p class="stats"><span>Уверен и верно: <b>${sure - sureWrong} из ${sure}</b></span>
                 <span>Сам поймал ошибок: <b>${caught}</b></span></p>` : ''}
+      <p class="stats"><span>Очки: <b>${points()}</b></span><span>Теорий пройдено: <b>${Object.keys(store.lessons).length}</b></span>
+        <span>Дней подряд: <b>${dayStreak()}</b></span>${secsTotal() >= 60 ? `<span>В тренажёре: <b>${hm(secsTotal())}</b></span>` : ''}</p>
+      <p class="muted" style="font-size:15px">Очки — не за скорость и не за угадывание: теория до конца +${PTS.theory},
+        пять верных подряд в теме +${PTS.series}, сам поймал свою ошибку +${PTS.caught}, перемешка целиком +${PTS.mix}.</p>
     </div>
     <div class="tabs">
       <button class="grade-tab${store.grade === 7 ? ' on' : ''}" data-gtab="7">7 класс</button>
@@ -2557,12 +2626,21 @@ function home() {
       <h2>Отправить результаты</h2>
       <p>Нажми кнопку и вставь текст в сообщение.</p>
       <div class="row"><button class="main" id="copy">Скопировать результаты</button>
+        <button class="ghost" id="bkp">Скопировать бэкап</button>
         <a href="./" class="muted" style="margin-left:auto">← к диагностической работе</a></div>
+      <p class="muted" style="font-size:15px">Это для родителя. Прогресс хранится в одном браузере: очистка данных сайта, инкогнито или другой компьютер — и накопленное исчезнет. «Бэкап» — та же учёба цифрами (очки, теории, дни, без текстов задач); сохрани строку в заметках.</p>
+      <details><summary>Восстановить из бэкапа</summary>
+        <p class="muted" style="font-size:15px">Вставь скопированную строку целиком и нажми кнопку — сначала тренажёр покажет, что изменится, и спросит подтверждение.</p>
+        <textarea id="bpaste" placeholder="algebra7-backup …"></textarea>
+        <div class="row"><button class="main" id="brest">Восстановить</button></div>
+      </details>
     </div>`;
   app.querySelectorAll('[data-mod]').forEach(b => b.onclick = startMix);
   app.querySelectorAll('[data-theory]').forEach(b => b.onclick = () => intro(MODULES.find(m => m.id === b.dataset.theory)));
   app.querySelectorAll('[data-practice]').forEach(b => b.onclick = () => practice(MODULES.find(m => m.id === b.dataset.practice)));
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
+  document.getElementById('bkp').onclick = e => copyText(e.currentTarget, backupText(), 'Бэкап скопирован ✓ — вставь в заметки');
+  document.getElementById('brest').onclick = restoreFromPaste;
   // Tabs: only the active класс is shown, but the other grade's cards stay in the DOM.
   app.querySelectorAll('.mods [data-grade]').forEach(el => { el.style.display = +el.dataset.grade === store.grade ? '' : 'none'; });
   app.querySelectorAll('[data-gtab]').forEach(b => b.onclick = () => {
@@ -2668,6 +2746,7 @@ function lessonScreen(mod) {
 }
 
 function intro(mod) {
+  session = { mod }; // the hud needs to know he is inside a topic, theory included
   if (mod.lesson) return lessonScreen(mod);
   app.innerHTML = `
     <div class="row between" style="margin-top:0"><button class="ghost" id="back">← Все темы</button></div>
@@ -2877,7 +2956,9 @@ function submit(conf) {
     s.solved++;
     // Solved after looking at hints: counts as solved, but not as "on his own" — the streak restarts.
     const alone = session.tries === 1 && !session.hints;
-    if (alone) { s.firstTry++; s.streak++; } else s.streak = 0;
+    // Only crossing a block of five earns: a streak carried from yesterday must not pay out
+    // again the next day after a single correct answer.
+    if (alone) { s.firstTry++; s.streak++; if (s.streak % 5 === 0) s.series = (s.series || 0) + 1; } else s.streak = 0;
     if (session.hints) s.helped = (s.helped || 0) + 1;
     if (session.caught) s.selfCaught++;
     let newly = false;
@@ -2913,13 +2994,15 @@ function submit(conf) {
 
 // `typed` is kept as written: "4/2" and "2" are the same number but different mistakes.
 function log(mod, task, typed, conf, right) {
-  store.log.push({ d: new Date().toISOString().slice(0, 16), m: mod.id,
+  if (right) dayRec().n++;
+  store.log.push({ d: stamp(), m: mod.id,
     q: task.q.replace(/<span class="fr"><span>(.*?)<\/span><span>(.*?)<\/span><\/span>/g, ' $1/$2').replace(/<sup>(.*?)<\/sup>/g, '^$1').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim(),
     a: typed, c: conf, ok: right, t: session.tries });
   if (store.log.length > 400) store.log.splice(0, store.log.length - 400);
 }
 
 function mixSummary() {
+  store.mixesDone++; save();
   app.innerHTML = `<div class="card" style="text-align:center">
     <h2>Перемешка готова</h2>
     <p>С первой попытки: <b>${session.mixRight} из ${MIX.size}</b>.</p>
@@ -2930,7 +3013,8 @@ function mixSummary() {
 }
 
 function resultsText() {
-  const lines = [`Тренажёр, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`];
+  const lines = [`Тренажёр, ${stamp().replace('T', ' ')}`,
+    `очки ${points()} · решено сегодня ${dayN()} · дней подряд ${dayStreak()} · в тренажёре ${hm(secsTotal())}`, ''];
   for (const m of MODULES) {
     const s = st(m.id);
     if (!s.solved && !s.sure) continue;
@@ -2944,17 +3028,60 @@ function resultsText() {
   return lines.join('\n');
 }
 
-function copyResults(btn) {
-  const text = resultsText();
+function copyText(btn, text, done) {
   const fallback = () => {
     document.getElementById('copy-box')?.remove();
     app.insertAdjacentHTML('beforeend', `<div class="card" id="copy-box"><p>Выдели весь текст (Ctrl+A), скопируй и отправь сообщением.</p>
-      <textarea>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</textarea></div>`);
+      <textarea>${esc(text)}</textarea></div>`);
     const t = document.querySelector('#copy-box textarea'); t.focus(); t.select(); t.scrollIntoView();
   };
   if (navigator.clipboard && window.isSecureContext)
-    navigator.clipboard.writeText(text).then(() => { btn.textContent = 'Скопировано ✓ — вставь в сообщение'; }).catch(fallback);
+    navigator.clipboard.writeText(text).then(() => { btn.textContent = done; }).catch(fallback);
   else fallback();
+}
+const copyResults = btn => copyText(btn, resultsText(), 'Скопировано ✓ — вставь в сообщение');
+
+// ---------- backup ----------
+// Progress lives in one browser, and the messenger passes text but not files, so the way
+// out of losing it is a string kept in notes. The task-text log stays out: it is the bulk
+// of the blob and it holds the child's written answers.
+const BACKUP_V = 1;
+const cksum = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
+const backupText = () => {
+  const j = JSON.stringify({ b: BACKUP_V, grade: store.grade, stats: store.stats, lessons: store.lessons,
+    days: store.days, mixesDone: store.mixesDone });
+  return `algebra7-backup ${cksum(j)} ${j}`;
+};
+function parseBackup(txt) {
+  const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+  if (a < 0 || b <= a) return { err: 'Не нашёл сами данные. Вставь строку целиком — от «algebra7-backup» до последней скобки.' };
+  const body = txt.slice(a, b + 1).replace(/\s+/g, ''), head = txt.slice(0, a).trim().split(/\s+/);
+  if (head[0] !== 'algebra7-backup') return { err: 'Это не бэкап тренажёра: нет метки algebra7-backup.' };
+  if (body.length > 200000) return { err: 'Слишком длинная строка — похоже, скопировалось лишнее.' };
+  // Checked before parsing: a paste truncated in transit must be named as such, not as "wrong format".
+  if (head[head.length - 1] !== cksum(body)) return { err: 'Строка повреждена при копировании. Скопируй заново всё, включая первые два слова.' };
+  let o; try { o = JSON.parse(body); } catch { return { err: 'Данные не читаются — попробуй вставить заново.' }; }
+  const obj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+  if (o.b !== BACKUP_V || !obj(o.stats) || !obj(o.lessons) || !obj(o.days)) return { err: 'Формат бэкапа не подходит этой версии тренажёра.' };
+  return { o };
+}
+const bkMsg = (text, cls) => {
+  document.getElementById('bkmsg')?.remove();
+  document.getElementById('bpaste').insertAdjacentHTML('afterend', `<div class="msg ${cls}" id="bkmsg">${text}</div>`);
+};
+function restoreFromPaste() {
+  const box = document.getElementById('bpaste'), p = parseBackup(box.value);
+  if (p.err) { box.focus(); return bkMsg(p.err, 'bad'); }
+  // Normalized before the preview: what the parent confirms must be what gets applied.
+  const o = normalizeStore({ ...p.o });
+  const cur = [points(), Object.keys(store.lessons).length, Object.keys(store.days).length];
+  const nxt = [points(o), Object.keys(o.lessons).length, Object.keys(o.days).length];
+  if (!confirm(`Заменить текущий прогресс бэкапом?\n\nСейчас:   очки ${cur[0]}, теорий ${cur[1]}, дат ${cur[2]}\nВ бэкапе: очки ${nxt[0]}, теорий ${nxt[1]}, дат ${nxt[2]}\n\nОтменить — только вставив строку более раннего бэкапа.`)) return;
+  // The error log is not part of the backup, so the old device's list goes with the progress it belongs to.
+  store = { ...store, ...o, log: [] };
+  normalizeStore(); save(); home();
+  document.querySelector('#app .card')?.insertAdjacentHTML('beforeend',
+    `<div class="msg ok">Бэкап восстановлен: очки <b>${points()}</b>, теорий <b>${Object.keys(store.lessons).length}</b>, дат <b>${Object.keys(store.days).length}</b>. Список последних ошибок очищен — текстов задач в бэкапе нет.</div>`);
 }
 
 home();
