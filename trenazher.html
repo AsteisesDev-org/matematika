@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Алгебра 7: тренажёр</title>
+<title>Алгебра 7–8: тренажёр</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233f6ad8'/%3E%3Ctext x='29' y='46' font-family='Georgia,serif' font-size='40' font-style='italic' fill='white' text-anchor='middle'%3Ex%3C/text%3E%3Ctext x='49' y='28' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3E2%3C/text%3E%3C/svg%3E">
 <style>
   :root {
@@ -34,6 +34,10 @@
   .stages { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; }
   .stage { font: inherit; font-size: 15px; padding: 5px 12px; border-radius: 99px; border: 2px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
   .stage.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; cursor: default; }
+  .tabs { display: flex; gap: 8px; margin: 14px 0 2px; }
+  .grade-tab { font: inherit; font-size: 16px; font-weight: 600; padding: 8px 20px; border-radius: 99px;
+               border: 2px solid var(--line); background: #fff; color: var(--muted); cursor: pointer; }
+  .grade-tab.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
   .help { border-color: var(--warn); color: var(--warn); }
   .help.pulse { background: var(--warn); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { transform: scale(1.04); box-shadow: 0 0 0 6px rgba(201, 130, 43, .25); } }
@@ -1814,6 +1818,66 @@ function genInterval() {
   };
 }
 
+// ---------- completing the square (grade 8) ----------
+// The answer is two roots, typed "4; -2" (order does not matter). Index marks
+// (x₁, x2), stray letters and "=" are stripped so "x = 4; x = -2" also counts;
+// exactly two numbers are required.
+function parseRoots(str) {
+  const s = String(str || '').replace(/[−–—]/g, '-')
+    .replace(/[₀-₉]/g, '')            // subscript digits are root indices, not values
+    .replace(/[xхyу]\s*\d+/gi, '')    // "x1", "x2" — an index with its number
+    .replace(/[xхyу]/gi, '')          // a lone letter
+    .replace(/=/g, ' ')
+    .replace(/-\s+(\d)/g, '-$1');     // "− 6" (space after minus) is still −6, not 6
+  const m = s.match(/-?\d+(?:[.,]\d+)?/g);
+  if (!m || m.length !== 2) return null;
+  const vals = m.map(v => parse(v));
+  if (vals.some(p => !p) || !vals.every(p => Number.isFinite(p.value))) return null;
+  return { value: vals.map(p => p.value).sort((a, b) => a - b), form: 'roots' };
+}
+function genSqComp() {
+  // x² + b·x + c = 0 with b = 2u; (x + u)² = d², roots −u ± d. Chosen so both
+  // roots are integers: c = u² − d². Avoid u = 0 (b = 0) and |u| = d (c = 0).
+  let u, d;
+  do { u = pick([-6, -5, -4, -3, -2, 2, 3, 4, 5, 6]); d = ri(1, 4); } while (Math.abs(u) === d);
+  const b = 2 * u, c = u * u - d * d;
+  const r1 = -u + d, r2 = -u - d;
+  const roots = [Math.min(r1, r2), Math.max(r1, r2)];
+  const bTerm = (b < 0 ? '− ' : '+ ') + Math.abs(b) + 'x';
+  const cTerm = (c < 0 ? '− ' : '+ ') + Math.abs(c);
+  const binom = `(x ${u < 0 ? '−' : '+'} ${Math.abs(u)})`;
+  const checkLine = r => `(${fmt(r)})<sup>2</sup> ${b < 0 ? '−' : '+'} ${Math.abs(b)}·(${fmt(r)}) ${c < 0 ? '−' : '+'} ${Math.abs(c)} = 0 ✓`;
+  return {
+    q: `Реши уравнение выделением квадрата двучлена:<br>x<sup>2</sup> ${bTerm} ${cTerm} = 0`,
+    answer: roots, parseAns: parseRoots,
+    same: v => v.length === 2 && eq(v[0], roots[0]) && eq(v[1], roots[1]),
+    formHint: 'оба корня через точку с запятой',
+    inputHint: 'Запиши оба корня через точку с запятой, например: 2; 5. Порядок не важен.',
+    scaffolds: [
+      { label: `Шаг 1. Перенеси число в правую часть (знак меняется): x<sup>2</sup> ${bTerm} = ?`,
+        answer: -c, hint: `Переносим ${fmt(c)} через «=» — его знак становится противоположным: ${fmt(-c)}.` },
+      { label: `Шаг 2. Число при x раздели пополам и возведи в квадрат — это добавка к обеим частям: (${fmt(b)} : 2)<sup>2</sup> = ?`,
+        answer: u * u, hint: `Половина от ${fmt(b)} равна ${fmt(u)}. Её квадрат: (${fmt(u)})<sup>2</sup> = ${u * u}.` },
+      { label: `Шаг 3. Прибавь ${u * u} к обеим частям. Слева выйдет ${binom}<sup>2</sup>, справа ${fmt(-c)} + ${u * u} = ?`,
+        answer: d * d, hint: `${fmt(-c)} + ${u * u} = ${d * d}. Значит ${binom}<sup>2</sup> = ${d * d}.` },
+    ],
+    diagnose(v) {
+      if (!Array.isArray(v) || v.length !== 2) return 'Нужно два числа — оба корня. Запиши их через точку с запятой.';
+      const bad = [Math.min(u + d, u - d), Math.max(u + d, u - d)];
+      if (eq(v[0], bad[0]) && eq(v[1], bad[1]))
+        return `Ты взял ${fmt(u)} ± ${fmt(d)}, а надо <b>${fmt(-u)} ± ${fmt(d)}</b>: у ${fmt(u)} при переносе вправо знак меняется на противоположный.`;
+      return `Сначала выдели квадрат: ${binom}<sup>2</sup> = ${d * d}. Потом извлеки корень с двумя знаками: x ${u < 0 ? '−' : '+'} ${Math.abs(u)} = ${fmt(d)} <b>или</b> ${fmt(-d)} — отсюда два корня.`;
+    },
+    solution: `<p>Переносим ${fmt(c)} вправо (знак меняется):<br>x<sup>2</sup> ${bTerm} = ${fmt(-c)}</p>
+      <p>Половина числа при x: ${fmt(b)} : 2 = ${fmt(u)}. Её квадрат: (${fmt(u)})<sup>2</sup> = ${u * u}. Прибавляем к <b>обеим</b> частям:<br>x<sup>2</sup> ${bTerm} + ${u * u} = ${fmt(-c)} + ${u * u}</p>
+      <p>Слева — полный квадрат, справа ${d * d}:<br>${binom}<sup>2</sup> = ${d * d}</p>
+      <p>Извлекаем корень — не забываем «±»:<br>x ${u < 0 ? '−' : '+'} ${Math.abs(u)} = ${fmt(d)} &nbsp;или&nbsp; x ${u < 0 ? '−' : '+'} ${Math.abs(u)} = ${fmt(-d)}</p>
+      <p>Переносим ${fmt(u)}: x = ${fmt(r1)} &nbsp;или&nbsp; x = ${fmt(r2)}</p>
+      <p>Ответ: <b>x = ${fmt(roots[0])}</b> и <b>x = ${fmt(roots[1])}</b></p>
+      <p class="muted">Проверка подстановкой:<br>${checkLine(roots[0])}<br>${checkLine(roots[1])}</p>`
+  };
+}
+
 // ---------- modules ----------
 const MODULES = [
   { id: 'neg', title: 'Сложение и вычитание отрицательных', short: 'Отрицательные', gen: genNeg,
@@ -2235,6 +2299,55 @@ const MODULES = [
            ['x² = 16, значит x = 4', 'И −4 тоже подходит: (−4)² = 16. Корней <b>два</b>: 4 и −4.'],
            ['Точка (−2; 4) не лежит на y = x², потому что x отрицательный', 'Знак x не важен: (−2)² = 4 — совпало с y точки, значит точка <b>лежит</b>.'],
            ['y = x³ при x = −2 равно 8', '(−2)³ = (−2) · (−2) · (−2) = <b>−8</b>. Куб сохраняет знак, в отличие от квадрата.']] },
+  { id: 'sqcomp', title: 'Решение квадратного уравнения выделением квадрата двучлена', short: 'Выделение квадрата', gen: genSqComp,
+    lesson: {
+      hook: 'К квадратному уравнению можно подступиться не только через дискриминант. Есть приём <b>выделить квадрат двучлена</b>: превратить левую часть в (x + что-то)². Он понятен, работает всегда — и именно из него в учебнике выводят формулу корней. Разберём всё по шагам.',
+      examples: [
+        { title: 'как устроен квадрат двучлена', problem: 'Раскроем (x + 3)²', steps: [
+          { math: '(x + 3)² = (x + 3) · (x + 3)', why: 'Квадрат — это произведение двучлена на себя. Множим «каждый на каждого».' },
+          { math: '= x·x + x·3 + 3·x + 3·3 = x<sup>2</sup> + 6x + 9', why: 'Два средних слагаемых (3x и 3x) складываются в 6x. Смотри на закономерность: <b>6 = 2 · 3</b>, а <b>9 = 3²</b>.' },
+          { math: 'Наоборот: x<sup>2</sup> + 6x + 9 = (x + 3)²', why: 'Если число при x равно 2 · 3, а свободное число равно 3², перед нами готовый квадрат (x + 3)². На этом держится весь приём.' } ] },
+        { title: 'какое число «закрывает» квадрат', problem: 'Как из x<sup>2</sup> + 10x сделать полный квадрат?', steps: [
+          { math: '(x + 5)² = x<sup>2</sup> + 10x + 25', why: 'Берём <b>половину</b> числа при x: 10 : 2 = 5. Тогда в квадрате появляется лишнее число — 25.' },
+          { think: true, math: 'Значит, к x<sup>2</sup> + 10x надо прибавить 25, и выйдет (x + 5)²', why: '25 — это квадрат половины: 5². Правило: добавляем (половина числа при x)².' },
+          { try: { label: 'Какое число добавить к x<sup>2</sup> − 6x, чтобы вышел квадрат (x − 3)²?', answer: 9, hint: 'Половина от 6 равна 3, а 3² = 9.' }, math: 'x<sup>2</sup> − 6x + 9 = (x − 3)²' },
+          { try: { label: 'А к x<sup>2</sup> + 4x нужно добавить:', answer: 4, hint: '4 : 2 = 2, а 2² = 4.' }, math: 'x<sup>2</sup> + 4x + 4 = (x + 2)²' } ] },
+        { title: 'решаем уравнение по шагам (разбираем вместе)', problem: 'x<sup>2</sup> + 6x + 5 = 0', steps: [
+          { math: 'Шаг 1. Переносим свободное число вправо (знак меняется):<br>x<sup>2</sup> + 6x = −5', why: 'Освобождаем место слева — туда мы поставим полный квадрат.' },
+          { math: 'Шаг 2. Половина числа при x: 6 : 2 = 3. Её квадрат: 3² = 9', why: 'Это та самая добавка, которой не хватает до (x + 3)².' },
+          { math: 'Шаг 3. Прибавляем 9 <b>к обеим частям</b>:<br>x<sup>2</sup> + 6x + 9 = −5 + 9', why: 'Добавим только слева — и равенство сломается. Добавляем одинаковое число с обеих сторон. Справа: −5 + 9 = 4.' },
+          { math: 'Шаг 4. Слева — готовый квадрат:<br>(x + 3)² = 4', why: 'x<sup>2</sup> + 6x + 9 — это ровно (x + 3)². Уравнение стало простым.' },
+          { math: 'Шаг 5. Извлекаем корень — обязательно с «±»:<br>x + 3 = 2 &nbsp;или&nbsp; x + 3 = −2', why: 'Квадрат, равный 4, бывает и у 2, и у −2: 2² = 4 и (−2)² = 4. Отсюда два корня, а не один.' },
+          { try: { label: 'Из x + 3 = 2: x = ?', answer: -1, hint: 'Перенеси 3 вправо, знак меняется: x = 2 − 3.' }, math: 'x + 3 = 2 → x = −1' },
+          { try: { label: 'Из x + 3 = −2: x = ?', answer: -5, hint: 'x = −2 − 3.' }, math: 'x + 3 = −2 → x = −5' },
+          { math: 'Ответ: x = −1 и x = −5', why: 'Проверка подстановкой: (−1)² + 6·(−1) + 5 = 1 − 6 + 5 = 0 ✓; (−5)² + 6·(−5) + 5 = 25 − 30 + 5 = 0 ✓.',
+            pic: curvePlot({ f: x => x * x + 6 * x + 5, xr: 8, yr: 12, points: [{ x: -1, y: 0, color: '#2e8b57' }, { x: -5, y: 0, color: '#2e8b57' }] }) } ] },
+        { title: 'твоя очередь — реши сам по шагам', problem: 'x<sup>2</sup> − 8x + 12 = 0', steps: [
+          { try: { label: 'Шаг 1. Перенеси 12 вправо: x<sup>2</sup> − 8x = ?', answer: -12, hint: 'Знак меняется: было +12, стало −12.' }, math: 'x<sup>2</sup> − 8x = −12' },
+          { try: { label: 'Шаг 2. Половина числа при x равна −4. Её квадрат: (−4)² = ?', answer: 16, hint: '−4 · (−4) = 16 (минус на минус — плюс). Это добавка к обеим частям.' }, math: 'Прибавляем 16 к обеим частям: x<sup>2</sup> − 8x + 16 = −12 + 16' },
+          { try: { label: 'Шаг 3. Правая часть: −12 + 16 = ?', answer: 4, hint: '−12 + 16 = 4.' }, math: 'Слева — полный квадрат: (x − 4)² = 4' },
+          { math: 'Шаг 4. Извлекаем корень с «±»:<br>x − 4 = 2 &nbsp;или&nbsp; x − 4 = −2', why: 'Квадрат, равный 4, даёт два числа: 2 и −2.' },
+          { try: { label: 'Шаг 5. Больший корень (из x − 4 = 2): x = ?', answer: 6, hint: 'x = 2 + 4.' }, math: 'x − 4 = 2 → x = 6' },
+          { try: { label: 'Меньший корень (из x − 4 = −2): x = ?', answer: 2, hint: 'x = −2 + 4.' }, math: 'x − 4 = −2 → x = 2', why: 'Проверка: 6² − 8·6 + 12 = 36 − 48 + 12 = 0 ✓; 2² − 8·2 + 12 = 4 − 16 + 12 = 0 ✓.',
+            pic: curvePlot({ f: x => x * x - 8 * x + 12, xr: 8, yr: 12, points: [{ x: 2, y: 0, color: '#2e8b57' }, { x: 6, y: 0, color: '#2e8b57' }] }) } ] },
+        { title: 'а если правая часть отрицательная?', problem: 'x<sup>2</sup> + 2x + 5 = 0', steps: [
+          { math: 'x<sup>2</sup> + 2x = −5', why: 'Перенесли 5 вправо (знак поменялся).' },
+          { math: 'x<sup>2</sup> + 2x + 1 = −5 + 1, то есть (x + 1)² = −4', why: 'Половина от 2 равна 1, её квадрат = 1. Прибавили к обеим частям; справа −5 + 1 = −4.' },
+          { try: { label: 'Сколько корней у уравнения (x + 1)² = −4?', parse: parseWord, same: v => v === 'нет' || v === 'ноль' || v === '0',
+                   inputHint: 'Словом: «один», «два» или «нет».', hint: 'Квадрат любого числа не меньше нуля. Может ли (x + 1)² быть равным −4?' },
+            math: '(x + 1)² = −4 → <b>корней нет</b>', why: 'Левая часть — квадрат, она никогда не бывает отрицательной, а справа −4. Равенства не выходит ни при каком x.',
+            pic: curvePlot({ f: x => x * x + 2 * x + 5, xr: 6, yr: 16 }) } ] }],
+      rule: `<ul>
+        <li><b>Полный квадрат.</b> Из x<sup>2</sup> + bx получается (x + b/2)². Чтобы его собрать, добавь <b>квадрат половины</b> числа при x: (b/2)².</li>
+        <li><b>Алгоритм:</b> перенеси свободное число вправо → прибавь (b/2)² к <b>обеим</b> частям → сверни левую часть в (x + b/2)² → извлеки корень с «±» → получишь два x.</li>
+        <li>Не теряй <b>второй знак</b>: из (x + 3)² = 4 выходит x + 3 = 2 <b>или</b> x + 3 = −2 — два корня, а не один.</li>
+        <li>Если справа получилось <b>отрицательное</b> число — корней нет: квадрат меньше нуля быть не может.</li>
+        <li><b>Проверяй подстановкой:</b> подставь каждый корень в исходное уравнение — должно выйти 0.</li></ul>` },
+    oops: [['x<sup>2</sup> + 6x + 9 = (x + 9)²', 'В скобке — <b>половина</b> числа при x, а не всё свободное число: 6 : 2 = 3, значит (x + 3)². Проверь: (x + 3)² = x<sup>2</sup> + 6x + 9 ✓.'],
+           ['x<sup>2</sup> + 6x = −5 → x<sup>2</sup> + 6x + 9 = −5', 'Девятку прибавили только слева — равенство сломалось. Правильно к обеим частям: x<sup>2</sup> + 6x + 9 = −5 <b>+ 9</b> = 4.'],
+           ['(x + 3)² = 4 → x + 3 = 2 → x = −1', 'Потерян второй корень: (x + 3)² = 4 даёт ещё x + 3 = <b>−2</b> → x = −5. У квадратного уравнения обычно два корня.'],
+           ['(x − 4)² = x<sup>2</sup> − 16', 'Пропал средний член. (x − 4)² = x<sup>2</sup> − 8x + 16: тут есть и −8x (это −2 · 4 · x), и +16 (это (−4)²).'],
+           ['x + 3 = 2 → x = 2 + 3 = 5', 'Перенося 3 вправо, меняй знак: x = 2 − 3 = <b>−1</b>. Проверь: у 5 не выходит 0, а −1 подходит.']] },
   { id: 'dmul', title: 'Умножение десятичных дробей', short: 'Дес. умножение', gen: genDecMul,
     lesson: {
       hook: 'Умножать десятичные дроби легко: считаем как целые числа, а потом ставим запятую. Главное — понять, <b>куда</b>.',
@@ -2367,13 +2480,15 @@ const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемеш
 // sections, not chapters: степень с натуральным показателем — § 2, одночлены и
 // y = x², y = x³ — § 7. Where the number is not confirmed, the title has none.
 // The order below is what numbers the topics — changing it renumbers them for the child.
+// `grade` drives the tab in home(): 7 and 8 are shown on separate tabs but keep one
+// running topic number, so a topic never renumbers when the child switches tabs.
 const SECTIONS = [
-  { title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
-  { title: 'Учебник: выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
-  { title: 'Учебник: функция, формула и график', ids: ['fn'] },
-  { title: 'Учебник, глава 2. Степень с натуральным показателем', ids: ['pow'] },
-  { title: 'Учебник, глава 7. Одночлены', ids: ['mono', 'monomul', 'sqcube'] },
-  { title: 'Из учебника 8 класса', ids: ['int'] },
+  { grade: 7, title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
+  { grade: 7, title: 'Учебник: выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
+  { grade: 7, title: 'Учебник: функция, формула и график', ids: ['fn'] },
+  { grade: 7, title: 'Учебник, глава 2. Степень с натуральным показателем', ids: ['pow'] },
+  { grade: 7, title: 'Учебник, глава 7. Одночлены', ids: ['mono', 'monomul', 'sqcube'] },
+  { grade: 8, title: 'Из учебника 8 класса', ids: ['int', 'sqcomp'] },
 ];
 SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
 
@@ -2383,6 +2498,7 @@ let store = JSON.parse(localStorage.getItem(KEY) || '{}');
 store.stats = store.stats || {};
 store.log = store.log || [];
 store.lessons = store.lessons || {};
+store.grade = store.grade === 8 ? 8 : 7; // which класс tab was last open
 const save = () => localStorage.setItem(KEY, JSON.stringify(store));
 const today = () => new Date().toISOString().slice(0, 10);
 function st(id) {
@@ -2400,7 +2516,7 @@ function home() {
   const caught = all.reduce((s, x) => s + x.selfCaught, 0);
   app.innerHTML = `
     <h1>Тренажёр</h1>
-    <p class="muted">Алгебра, 7 класс · по итогам диагностики</p>
+    <p class="muted">Алгебра, ${store.grade} класс${store.grade === 7 ? ' · по итогам диагностики' : ' · новые темы, разбор по шагам'}</p>
     <div class="card">
       <h2>Как заниматься</h2>
       <ul>
@@ -2413,10 +2529,14 @@ function home() {
       ${sure ? `<p class="stats"><span>Уверен и верно: <b>${sure - sureWrong} из ${sure}</b></span>
                 <span>Сам поймал ошибок: <b>${caught}</b></span></p>` : ''}
     </div>
+    <div class="tabs">
+      <button class="grade-tab${store.grade === 7 ? ' on' : ''}" data-gtab="7">7 класс</button>
+      <button class="grade-tab${store.grade === 8 ? ' on' : ''}" data-gtab="8">8 класс</button>
+    </div>
     <div class="mods">
-      ${SECTIONS.map(sec => `<h3 class="sec">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
+      ${SECTIONS.map(sec => `<h3 class="sec" data-grade="${sec.grade}">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
         const s = st(m.id), mastered = s.mastered.includes(today()), open = theoryDone(m);
-        return `<div class="mod-card${open ? '' : ' fresh'}"><b>${m.n}. ${m.title}</b>
+        return `<div class="mod-card${open ? '' : ' fresh'}" data-grade="${sec.grade}"><b>${m.n}. ${m.title}</b>
           <div class="parts">
             <button class="part theory${open ? ' passed' : ''}" data-theory="${m.id}">📖 Теория${open ? ' ✓' : ''}</button>
             <button class="part practice" data-practice="${m.id}"${open ? '' : ' disabled title="Сначала пройди теорию"'}>${open ? '✏️' : '🔒'} Практика</button>
@@ -2443,6 +2563,12 @@ function home() {
   app.querySelectorAll('[data-theory]').forEach(b => b.onclick = () => intro(MODULES.find(m => m.id === b.dataset.theory)));
   app.querySelectorAll('[data-practice]').forEach(b => b.onclick = () => practice(MODULES.find(m => m.id === b.dataset.practice)));
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
+  // Tabs: only the active класс is shown, but the other grade's cards stay in the DOM.
+  app.querySelectorAll('.mods [data-grade]').forEach(el => { el.style.display = +el.dataset.grade === store.grade ? '' : 'none'; });
+  app.querySelectorAll('[data-gtab]').forEach(b => b.onclick = () => {
+    if (+b.dataset.gtab === store.grade) return;
+    store.grade = +b.dataset.gtab; save(); home();
+  });
 }
 
 const theoryDone = m => !m.lesson || !!store.lessons[m.id];
