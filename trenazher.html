@@ -48,6 +48,9 @@
   .mod-btn b { display: block; font-size: 18px; }
   .mod-btn small { color: var(--muted); display: block; margin-top: 4px; }
   .mod-btn.mix { border-color: var(--accent); background: var(--accent-soft); }
+  .mod-btn.journal { border-color: var(--warn); background: var(--warn-soft); }
+  .mod-btn.journal:disabled { border-color: var(--line); }
+  .mod-btn.oops { border-color: var(--ok); background: var(--ok-soft); }
   .badge { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 99px;
            background: var(--accent-soft); color: var(--accent); margin-top: 6px; }
   .badge.done { background: var(--ok-soft); color: var(--ok); }
@@ -115,6 +118,21 @@
 // ---------- numbers ----------
 const ri = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const pick = a => a[Math.floor(Math.random() * a.length)];
+// Every generator draws randomness only from Math.random (verified for all 17), so swapping
+// it for a seeded PRNG replays exactly the same task from its seed — the journal relies on this.
+const mulberry32 = a => () => {
+  a = (a + 0x6D2B79F5) | 0;
+  let t = Math.imul(a ^ (a >>> 15), 1 | a);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const withSeed = (seed, fn) => {
+  const real = Math.random;
+  Math.random = mulberry32(seed >>> 0);
+  try { return fn(); } finally { Math.random = real; }
+};
+// An error is retried 1 → 3 → 7 → 14 days after the last outcome; four clean solves close it.
+const GAPS = [1, 3, 7, 14], JOURNAL_CAP = 40;
 const round6 = x => Math.round(x * 1e6) / 1e6;
 const eq = (a, b) => Math.abs(a - b) < 1e-9;
 const fmt = x => String(round6(x)).replace('-', '−').replace('.', ',');
@@ -2478,6 +2496,59 @@ const MODULES = [
     oops: [['2½ = 4/2', '4/2 = 2 — половинка потерялась. 2 · 2 = 4 половинки и ещё 1: <b>5/2</b>.']] },
 ];
 const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемешка', size: 10 };
+const JOURNAL = { id: 'journal', title: 'Ошибник', short: 'Ошибник' };
+const OOPS = { id: 'oops-all', title: 'Ошибки Пети', short: 'Ошибки Пети', size: 5 };
+// Мета параллельна массивам oops каждого модуля (индексы сверяет секция E проверок).
+// kind: 'num' | 'lin' | 'mono' | 'eq' | 'roots' | 'interval' — поле ответа через существующие
+// парсеры; 'verdict' — только выбор «прав/ошибся». OOPS_TRAPS — что Петя пишет ВЕРНО:
+// без них сеанс вырождается в «всегда ищи ошибку».
+const OOPS_META = {
+  neg: [{ kind: 'num', fix: '−13' }, { kind: 'num', fix: '4' }],
+  brk: [{ kind: 'lin', fix: '−a − 4b + 4' }, { kind: 'lin', fix: '10 − x' }],
+  frac: [{ kind: 'num', fix: '5/6' }, { kind: 'num', fix: '12' }],
+  eq: [{ kind: 'num', fix: '3' }, { kind: 'num', fix: '5' }, { kind: 'eq', fix: '3x − 6 = x + 4' }],
+  eqw: [{ kind: 'num', fix: '19', ask: 'Сколько яблок во второй корзине на самом деле?' },
+    { kind: 'eq', fix: '3x + 2(x + 5) = 110', ask: 'В Петином уравнении тетради посчитаны неверно. Запиши верное уравнение:' }],
+  fn: [{ kind: 'verdict' }, { kind: 'num', fix: '460', ask: 'Сколько рублей стоит поездка на 12 км?' },
+    { kind: 'verdict' }, { kind: 'verdict' }],
+  int: [{ kind: 'interval', fix: '[−2; 5)' }, { kind: 'verdict' }],
+  pow: [{ kind: 'num', fix: '9' }],
+  mono: [{ kind: 'verdict' }, { kind: 'mono', fix: '9a²' },
+    { kind: 'num', fix: '5', ask: 'Какова степень одночлена −5a³b²?' }, { kind: 'num', fix: '−72' }],
+  monomul: [{ kind: 'mono', fix: '20a⁵' }, { kind: 'mono', fix: '8a³' }, { kind: 'mono', fix: '9x⁴' }, { kind: 'mono', fix: 'a²' }],
+  sqcube: [{ kind: 'num', fix: '25' }, { kind: 'roots', fix: '4; −4', show: '4 и −4' }, { kind: 'verdict' }, { kind: 'num', fix: '−8' }],
+  sqcomp: [{ kind: 'num', fix: '3', ask: 'Какое число должно стоять в скобке: x² + 6x + 9 = (x + ?)²?' },
+    { kind: 'num', fix: '4', ask: 'Что должно получиться в правой части?' },
+    { kind: 'roots', fix: '−1; −5', show: '−1 и −5' },
+    { kind: 'lin', fix: '−8x', ask: 'Какой член Петя потерял при возведении в квадрат?' },
+    { kind: 'num', fix: '−1' }],
+  dmul: [{ kind: 'num', fix: '0,06' }],
+  ddiv: [{ kind: 'num', fix: '40' }],
+  pct: [{ kind: 'num', fix: '9' }],
+  unk: [{ kind: 'num', fix: '5' }],
+  mix: [{ kind: 'num', fix: '5/2' }],
+};
+const OOPS_TRAPS = {
+  neg: [['−3 + (−7) = −10', 'Долг плюс долг: модули складываем, знак остаётся минусом ✓'],
+    ['8 − (−2) = 10', 'Вычесть −2 — это прибавить 2: 8 + 2 = 10 ✓']],
+  brk: [['−(x + 3) = −x − 3', 'Минус раздался обоим слагаемым: и x, и 3 поменяли знак ✓']],
+  frac: [['1/2 + 1/6 = 2/3', 'Общий знаменатель 6: 3/6 + 1/6 = 4/6, а это 2/3 ✓']],
+  eq: [['x + 3 = 7, x = 4', 'Проверка: 4 + 3 = 7 ✓ — корень найден верно']],
+  fn: [['y = 7 — линейная функция', 'Это y = 0 · x + 7: k = 0, b = 7. Линейная ✓'],
+    ['y = 3x + 1 и y = 3x − 2 параллельны', 'k одинаковые (3 = 3) — наклоны равны, пересечения нет ✓']],
+  int: [['−2 ∈ [−2; 5)', 'У −2 квадратная скобка — число входит в промежуток ✓']],
+  pow: [['−4² = −16', 'Скобок нет: сначала 4² = 16, потом минус снаружи → −16 ✓']],
+  mono: [['3a · 2a = 6a²', 'Числа отдельно (3 · 2 = 6), буквы отдельно (a · a = a²) ✓']],
+  monomul: [['(3x)² = 9x²', 'В квадрат возводится и число (3² = 9), и буква ✓']],
+  sqcube: [['(−2)³ = −8', 'Куб сохраняет знак: (−2) · (−2) · (−2) = −8 ✓'],
+    ['Точка (−1; 1) лежит на графике y = x²', '(−1)² = 1 — совпало с y координатой ✓']],
+  sqcomp: [['x² + 4x + 4 = (x + 2)²', 'Половина от 4 — это 2: (x + 2)² = x² + 4x + 4 ✓']],
+  dmul: [['1,5 · 2 = 3', '15 · 2 = 30, один знак после запятой → 3 ✓']],
+  ddiv: [['3 : 0,5 = 6', 'Делим на половину → ответ удваивается. Проверка: 6 · 0,5 = 3 ✓']],
+  pct: [['10% от 45 = 4,5', '45 : 100 · 10 = 4,5 ✓']],
+  unk: [['45 : x = 9, x = 5', 'Проверка: 45 : 5 = 9 ✓']],
+  mix: [['1½ = 3/2', '1 целая — это 2 половинки, ещё одна → 3/2 ✓']],
+};
 
 // Topic numbers follow the course: the 5–6 grade base first, then the textbook, then
 // what it leaves for grade 8. Group titles use the child's own book, which numbers
@@ -2507,6 +2578,9 @@ function normalizeStore(s = store) {
   s.lessons = s.lessons && typeof s.lessons === 'object' ? s.lessons : {};
   s.days = s.days && typeof s.days === 'object' ? s.days : {};
   s.mixesDone = Number(s.mixesDone) || 0;
+  s.journalOut = Number(s.journalOut) || 0;
+  s.oopsDone = Number(s.oopsDone) || 0;
+  s.queue = Array.isArray(s.queue) ? s.queue : [];
   s.grade = s.grade === 8 ? 8 : 7; // anything else hides every topic card
   for (const id of Object.keys(s.stats)) {
     const t = s.stats[id];
@@ -2518,6 +2592,27 @@ function normalizeStore(s = store) {
     const r = s.days[d];
     s.days[d] = r && typeof r === 'object' ? { n: Number(r.n) || 0, secs: Number(r.secs) || 0 } : { n: 0, secs: 0 };
   }
+  // A queue entry must be replayable: an unknown topic, a bad seed or a generator that
+  // changed since (gv) would replay some other task under the guise of "the same one".
+  s.queue = s.queue.filter(e => {
+    if (!e || typeof e !== 'object') return false;
+    const m = MODULES.find(x => x.id === e.m);
+    if (!m || !Number.isInteger(e.seed) || e.seed < 0 || e.seed > 4294967295) return false;
+    if (e.gv !== (m.gv || 1)) return false;
+    // addDays(x,0) === x rejects shapes like 2026-13-45 that a regex alone would pass.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.due) || !/^\d{4}-\d{2}-\d{2}$/.test(e.d0)) return false;
+    if (addDays(e.due, 0) !== e.due || addDays(e.d0, 0) !== e.d0) return false;
+    // round: a fractional hits would index GAPS at undefined and poison due with "NaN-NaN-NaN".
+    e.hits = Math.min(Math.max(Math.round(Number(e.hits) || 0), 0), GAPS.length);
+    return true;
+  });
+  const seenQ = new Set();
+  s.queue = s.queue.filter(e => {
+    const k = e.m + ':' + e.seed;
+    if (seenQ.has(k)) return false; // two entries for one seed could graduate twice (+15 each)
+    seenQ.add(k);
+    return true;
+  }).slice(0, JOURNAL_CAP);
   return s;
 }
 normalizeStore();
@@ -2525,7 +2620,11 @@ let secsDirty = false; // seconds counted but not written yet
 const save = () => { secsDirty = false; localStorage.setItem(KEY, JSON.stringify(store)); renderHud(); };
 // The child's own calendar day, not the UTC one: an evening session must not be filed
 // under tomorrow (that also decides which day a streak breaks).
-const isoDay = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+// A function declaration, not a const arrow: the initial normalizeStore() below validates
+// queue dates through addDays → isoDay and would hit the TDZ otherwise.
+function isoDay(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 const today = () => isoDay(new Date());
 const stamp = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return today() + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); };
 function st(id) {
@@ -2535,10 +2634,10 @@ function st(id) {
 // ---------- progress ----------
 // Points are derived, never stored: every number below only grows, so the total cannot
 // drift out of sync with the counters and a scheme change needs no migration.
-const PTS = { theory: 20, series: 30, caught: 5, mix: 50 };
+const PTS = { theory: 20, series: 30, caught: 5, mix: 50, journal: 15, oops: 30 };
 const dayRec = () => store.days[today()] || (store.days[today()] = { n: 0, secs: 0 });
 const dayN = () => (store.days[today()] || {}).n || 0;
-const points = (o = store) => Object.keys(o.lessons || {}).length * PTS.theory + (o.mixesDone || 0) * PTS.mix
+const points = (o = store) => Object.keys(o.lessons || {}).length * PTS.theory + (o.mixesDone || 0) * PTS.mix + (o.journalOut || 0) * PTS.journal + (o.oopsDone || 0) * PTS.oops
   + Object.values(o.stats || {}).reduce((p, s) => p + (s.series || 0) * PTS.series + (s.selfCaught || 0) * PTS.caught, 0);
 // A day counts as studied with a solved task or five real minutes inside a topic — an
 // open tab doing nothing must not build a streak.
@@ -2551,6 +2650,38 @@ function dayStreak() {
   while (studied(isoDay(d))) { n++; d.setDate(d.getDate() - 1); }
   return n;
 }
+function addDays(iso, n) {
+  const d = new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + n);
+  return isoDay(d);
+}
+// Live references into store.queue: advancing an entry mutates it in place. Max five a day —
+// a long due-list reads as "you failed everything", not as a challenge.
+function dueEntries() {
+  const t = today();
+  return store.queue.filter(e => e.due <= t).sort((a, b) => a.due < b.due ? -1 : a.due > b.due ? 1 : 0).slice(0, 5);
+}
+function journalAdd(mId, seed, kind) {
+  const m = MODULES.find(x => x.id === mId);
+  if (!m || typeof seed !== 'number') return; // Petya's tasks are static, nothing to replay
+  const ex = store.queue.find(e => e.m === mId && e.seed === seed);
+  if (ex) { if (kind === 'fail') { ex.hits = 0; ex.due = addDays(today(), GAPS[0]); } return; }
+  const hits = kind === 'guess' ? 1 : 0;
+  store.queue.push({ m: mId, seed, gv: m.gv || 1, d0: today(), hits, due: addDays(today(), GAPS[hits]) });
+  while (store.queue.length > JOURNAL_CAP) {
+    let w = 0;
+    for (let i = 1; i < store.queue.length; i++) {
+      const a = store.queue[i], b = store.queue[w];
+      if (a.hits < b.hits || (a.hits === b.hits && a.due > b.due)) w = i;
+    }
+    store.queue.splice(w, 1);
+  }
+}
+function journalPass(e) {
+  e.hits++;
+  if (e.hits >= GAPS.length) { store.queue = store.queue.filter(x => x !== e); store.journalOut++; }
+  else e.due = addDays(today(), GAPS[e.hits]);
+}
+function journalBack(e) { e.hits = 0; e.due = addDays(today(), GAPS[0]); }
 const hm = s => { const h = Math.floor(s / 3600), m = Math.round((s - h * 3600) / 60);
   return s < 60 ? 'меньше минуты' : m === 60 ? (h + 1) + ' ч' : h && !m ? h + ' ч' : h ? h + ' ч ' + m + ' мин' : m + ' мин'; };
 
@@ -2596,7 +2727,8 @@ function home() {
       <p class="stats"><span>Очки: <b>${points()}</b></span><span>Теорий пройдено: <b>${Object.keys(store.lessons).length}</b></span>
         <span>Дней подряд: <b>${dayStreak()}</b></span>${secsTotal() >= 60 ? `<span>В тренажёре: <b>${hm(secsTotal())}</b></span>` : ''}</p>
       <p class="muted" style="font-size:15px">Очки — не за скорость и не за угадывание: теория до конца +${PTS.theory},
-        пять верных подряд в теме +${PTS.series}, сам поймал свою ошибку +${PTS.caught}, перемешка целиком +${PTS.mix}.</p>
+        пять верных подряд в теме +${PTS.series}, сам поймал свою ошибку +${PTS.caught}, перемешка целиком +${PTS.mix},
+        задача из ошибника прошла весь цикл повторения до конца +${PTS.journal}, сеанс Петиных ошибок целиком +${PTS.oops}.</p>
     </div>
     <div class="tabs">
       <button class="grade-tab${store.grade === 7 ? ' on' : ''}" data-gtab="7">7 класс</button>
@@ -2621,6 +2753,19 @@ function home() {
           <small>${ready ? `${MIX.size} задач вперемешку из тем, где пройдена теория (сейчас ${ready} из ${MODULES.length}). Делать в конце каждого занятия.`
             : 'Откроется, когда пройдёшь теорию хотя бы одной темы.'}</small></button>`;
       })()}
+      ${(() => {
+        const due = dueEntries(), total = store.queue.length;
+        if (!total && !store.journalOut) return `<p class="muted" style="font-size:15px">📗 <b>Ошибник</b> включится сам: не решилась задача — она вернётся через день, потом ещё несколько раз, всё дольше. Так пробел закрывается, а не откладывается.</p>`;
+        if (!total) return `<button class="mod-btn journal" disabled><b>📗 Ошибник</b><small>Все ошибки закрыты — новых пока нет. Споткнёшься на задаче — она появится здесь.</small></button>`;
+        if (!due.length) {
+          const nx = store.queue.map(e => e.due).sort()[0].split('-');
+          return `<button class="mod-btn journal" disabled><b>📗 Ошибник</b><small>На сегодня всё решено. Следующая задача вернётся ${nx[2]}.${nx[1]} — в ошибнике сейчас ${total}.</small></button>`;
+        }
+        return `<button class="mod-btn journal" data-jr="1"><b>📗 Ошибник</b>
+          <small>${due.length} задач на сегодня (всего в ошибнике ${total}). Это те же задачи, на которых ты споткнулся. Решишь начисто в назначенные дни (1 → 3 → 7 → 14) — задача уходит навсегда (+${PTS.journal}).</small></button>`;
+      })()}
+      <h3 class="sec">Тренировка взгляда</h3>
+      ${oopsCardHtml()}
     </div>
     <div class="card">
       <h2>Отправить результаты</h2>
@@ -2636,6 +2781,8 @@ function home() {
       </details>
     </div>`;
   app.querySelectorAll('[data-mod]').forEach(b => b.onclick = startMix);
+  app.querySelectorAll('[data-jr]').forEach(b => b.onclick = startJournal);
+  app.querySelectorAll('[data-op]').forEach(b => b.onclick = startOops);
   app.querySelectorAll('[data-theory]').forEach(b => b.onclick = () => intro(MODULES.find(m => m.id === b.dataset.theory)));
   app.querySelectorAll('[data-practice]').forEach(b => b.onclick = () => practice(MODULES.find(m => m.id === b.dataset.practice)));
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
@@ -2765,19 +2912,117 @@ function startMix() {
   session = { mod: MIX, mixLeft: MIX.size, mixDone: 0, mixRight: 0 };
   nextTask();
 }
+function startJournal() {
+  const es = dueEntries();
+  if (!es.length) return home();
+  session = { mod: JOURNAL, entries: es, pos: 0 };
+  nextTask();
+}
+
+// ---------- «Ошибки Пети» ----------
+// Two widgets only: "исправь" (text, checked with the module's own parser) for real mistakes,
+// "Петя прав?" (choice) for traps and verbal claims. Which kind THIS line is stays hidden
+// until the answer is checked — that is the drill.
+const oopsCard = s => '<div class="oops"><b>Петя написал:</b> ' + s + '</div>';
+function oopsAnswerTask(mod, wrong, why, meta) {
+  if (meta.kind === 'verdict')
+    return { _mod: mod, q: oopsCard(wrong) + '<br>Петя прав?', options: ['прав', 'ошибся'], answer: 'ошибся',
+      same: v => v === 'ошибся', solution: '<p><b>Петя ошибся.</b> ' + why + '</p>',
+      diagnose: () => 'Проверь Петино равенство числом: подставь и посчитай обе части.' };
+  const base = { _mod: mod, answer: meta.fix, q: oopsCard(wrong) + '<br>' + (meta.ask || 'В Петиной записи ошибка. Исправь — напиши, как правильно:'),
+    solution: '<p><b>Правильно:</b> ' + (meta.show || meta.fix) + '</p><p>' + why + '</p>' };
+  if (meta.kind === 'num') {
+    const T = parse(meta.fix).value;
+    Object.assign(base, { parseAns: parse, same: v => eq(v, T),
+      diagnose: () => 'Подставь своё число вместо Петиного — не сходится? Пересчитай и сверь знак и запятую.' });
+  } else if (meta.kind === 'lin') {
+    const T = parseLinear(meta.fix).value;
+    Object.assign(base, { parseAns: parseLinear, wide: true, same: v => sameLinear(v, T),
+      diagnose: () => 'Собери выражение по правилам темы: буквы с буквами, числа с числами, знак — отдельно.' });
+  } else if (meta.kind === 'mono') {
+    const T = parseMono(meta.fix).value;
+    Object.assign(base, { parseAns: parseMono, same: v => sameMono(v, T),
+      diagnose: () => 'Числа перемножь отдельно, буквы собери в степень — и сверь знак.' });
+  } else if (meta.kind === 'eq') {
+    const T = parseEq(meta.fix).value;
+    Object.assign(base, { parseAns: parseEq, wide: true, same: v => sameEquation(v, T),
+      diagnose: () => 'Каждое число при своей букве; «каждая тетрадь дороже» — это скобка.' });
+  } else if (meta.kind === 'roots') {
+    const T = parseRoots(meta.fix).value;
+    Object.assign(base, { parseAns: parseRoots, same: v => Array.isArray(v) && v.length === 2 && eq(v[0], T[0]) && eq(v[1], T[1]),
+      diagnose: () => 'У квадрата обычно два корня — не забудь отрицательный.' });
+  } else if (meta.kind === 'interval') {
+    const T = parseInterval(meta.fix).value;
+    Object.assign(base, { parseAns: parseInterval, same: v => v === T,
+      diagnose: () => 'Числа остаются те же — меняются только скобки: ≤ и <.' });
+  }
+  return base;
+}
+function oopsPool() {
+  const pool = [];
+  for (const m of MODULES) {
+    if (!theoryDone(m)) continue;
+    (m.oops || []).forEach((entry, i) => {
+      const meta = OOPS_META[m.id] && OOPS_META[m.id][i];
+      if (meta) pool.push({ mod: m, entry, meta });
+    });
+    for (const trap of OOPS_TRAPS[m.id] || []) pool.push({ mod: m, trap });
+  }
+  return pool;
+}
+function genOops() {
+  const it = pick(oopsPool());
+  if (it.trap)
+    return { _mod: it.mod, q: oopsCard(it.trap[0]) + '<br>Петя прав?', options: ['прав', 'ошибся'], answer: 'прав',
+      same: v => v === 'прав', solution: '<p><b>Да, здесь Петя прав.</b> ' + it.trap[1] + '</p>',
+      diagnose: () => 'Не торопись: подставь число или посчитай шаг. Петя может быть и прав.' };
+  return oopsAnswerTask(it.mod, it.entry[0], it.entry[1], it.meta);
+}
+function oopsCardHtml() {
+  const n = oopsPool().length;
+  const open = n ? '' : ' disabled';
+  const icon = n ? '🔍' : '🔒 ';
+  const note = n
+    ? '5 чужих решений. Петя то ошибается — найди и исправь, то пишет верно — и это надо распознать. Подвох есть в обе стороны. Сеанс целиком +' + PTS.oops + '.'
+    : 'Откроется с первой пройденной теории.';
+  return '<button class="mod-btn oops" data-op="1"' + open + '><b>' + icon + 'Ошибки Пети</b><small>' + note + '</small></button>';
+}
+function startOops() {
+  if (!oopsPool().length) return home();
+  session = { mod: OOPS, okLeft: OOPS.size, okRight: 0 };
+  nextTask();
+}
+
 
 function nextTask() {
   if (session.mod === MIX && session.mixLeft === 0) return mixSummary();
+  if (session.mod === OOPS) {
+    if (!session.okLeft) return oopsSummary();
+    session.okLeft--;
+    const t = genOops();
+    Object.assign(session, { entry: null, seed: null, task: t, taskMod: t._mod,
+      tries: 0, caught: false, finished: false, hints: 0, hintSteps: null, fails: 0 });
+    return renderTask();
+  }
+  if (session.mod === JOURNAL) {
+    if (session.pos >= session.entries.length) return journalSummary();
+    const e = session.entries[session.pos++], m = MODULES.find(x => x.id === e.m);
+    Object.assign(session, { entry: e, task: withSeed(e.seed, () => m.gen()), taskMod: m,
+      tries: 0, caught: false, finished: false, hints: 0, hintSteps: null, fails: 0 });
+    return renderTask();
+  }
   // Mix draws only from topics whose theory is done: no tasks from a topic he has not opened yet.
   const m = session.mod === MIX ? pick(MODULES.filter(theoryDone)) : session.mod;
-  Object.assign(session, { task: m.gen(), taskMod: m, tries: 0, caught: false, finished: false, hints: 0, hintSteps: null, fails: 0 });
+  const seed = (Math.random() * 4294967296) >>> 0;
+  Object.assign(session, { entry: null, seed, task: withSeed(seed, () => m.gen()), taskMod: m,
+    tries: 0, caught: false, finished: false, hints: 0, hintSteps: null, fails: 0 });
   renderTask();
 }
 
 function renderTask() {
   const { task, taskMod } = session;
   const s = st(taskMod.id);
-  const isMix = session.mod === MIX;
+  const isMix = session.mod === MIX, isJr = session.mod === JOURNAL, isOp = session.mod === OOPS;
   const scafs = scaffoldsOf(task);
   let num = 0;
   const mark = () => '①②③④⑤⑥'[num++];
@@ -2785,11 +3030,11 @@ function renderTask() {
   app.innerHTML = `
     <div class="row between" style="margin-top:0">
       <button class="ghost" id="back">← Все темы</button>
-      <span class="muted">${isMix ? `Перемешка: задача ${session.mixDone + 1} из ${MIX.size}` : `${taskMod.n}. ${taskMod.title}`}</span>
+      <span class="muted">${isMix ? `Перемешка: задача ${session.mixDone + 1} из ${MIX.size}` : isJr ? `📗 Ошибник: задача ${session.pos} из ${session.entries.length} · споткнулся ${session.entry.d0.slice(8)}.${session.entry.d0.slice(5, 7)}` : isOp ? `🔍 Ошибки Пети: задача ${OOPS.size - session.okLeft} из ${OOPS.size}` : `${taskMod.n}. ${taskMod.title}`}</span>
     </div>
     <div class="card">
-      ${isMix ? '' : stages(taskMod, 2)}
-      ${isMix ? '' : `<div class="streak">${[0, 1, 2, 3, 4].map(i => `<span class="${i < Math.min(s.streak, 5) ? 'on' : ''}"></span>`).join('')}</div>`}
+      ${isMix || isJr || isOp ? '' : stages(taskMod, 2)}
+      ${isMix || isJr || isOp ? '' : `<div class="streak">${[0, 1, 2, 3, 4].map(i => `<span class="${i < Math.min(s.streak, 5) ? 'on' : ''}"></span>`).join('')}</div>`}
       <div class="q">${task.q}${task.expr ? ' = ?' : ''}</div>
       ${task.predict ? `<div class="step"><div class="step-lbl">${mark()} ${task.predict.label}</div>
         <div class="choices">${task.predict.options.map(o => `<label><input type="radio" name="pred" value="${o}"><span>${o}</span></label>`).join('')}</div></div>` : ''}
@@ -2810,7 +3055,7 @@ function renderTask() {
     </div>`;
   document.getElementById('back').onclick = home;
   document.getElementById('help').onclick = showHint;
-  if (!isMix) wireStages(taskMod);
+  if (!isMix && !isOp) wireStages(taskMod);
   app.querySelectorAll('[data-conf]').forEach(b => b.onclick = () => submit(b.dataset.conf));
   app.querySelectorAll('input[type=text]').forEach((inp, i, all) => inp.onkeydown = e => {
     if (e.key !== 'Enter') return;
@@ -2872,6 +3117,8 @@ function showHint() {
   s.streak = 0;
   s.helped = (s.helped || 0) + 1;
   if (session.mod === MIX) { session.mixLeft--; session.mixDone++; }
+  // A task he read off the screen is not his error to drill; a journal one just waits a day.
+  if (session.entry) journalBack(session.entry);
   log(taskMod, task, '(разобрал с помощью)', '', false);
   save();
   document.getElementById('buttons').hidden = true;
@@ -2961,9 +3208,14 @@ function submit(conf) {
     if (alone) { s.firstTry++; s.streak++; if (s.streak % 5 === 0) s.series = (s.series || 0) + 1; } else s.streak = 0;
     if (session.hints) s.helped = (s.helped || 0) + 1;
     if (session.caught) s.selfCaught++;
+    // Journal: a review counts only as a clean first try; a first-try answer he himself
+    // doubted comes back too, just later — certainty, not luck, closes a gap.
+    if (session.entry) { if (alone) journalPass(session.entry); else journalBack(session.entry); }
+    else if (session.tries === 1 && conf === 'doubt' && !session.hints) journalAdd(taskMod.id, session.seed, 'guess');
     let newly = false;
     if (s.streak >= 5 && !s.mastered.includes(today())) { s.mastered.push(today()); newly = true; }
     if (session.mod === MIX) { session.mixLeft--; session.mixDone++; if (alone) session.mixRight++; }
+    if (session.mod === OOPS && alone) session.okRight++;
     save();
     feedback('ok', `<b>Верно!</b> ${session.caught ? 'И ошибку ты нашёл сам — так и надо.' : ''}
       ${predWrong ? `<br>А вот прикидка была неточной: правильно «${task.predict.correct}». Подумай, почему.` : ''}
@@ -2985,6 +3237,7 @@ function submit(conf) {
   }
   session.finished = true;
   if (session.mod === MIX) { session.mixLeft--; session.mixDone++; }
+  if (session.entry) journalBack(session.entry); else journalAdd(taskMod.id, session.seed, 'fail');
   save();
   feedback('bad', binary ? '<b>Неверно. Разберём:</b>' : '<b>Разберём решение.</b>',
     `<div class="solution">${task.solution}</div>
@@ -3012,9 +3265,33 @@ function mixSummary() {
   document.getElementById('again').onclick = startMix;
 }
 
+function journalSummary() {
+  const es = session.entries;
+  const gone = es.filter(e => !store.queue.includes(e)).length;
+  save();
+  app.innerHTML = `<div class="card" style="text-align:center">
+    <h2>📗 Ошибник разобран</h2>
+    <p>Сегодняшних задач: <b>${es.length}</b>, закрыто навсегда: <b>${gone}</b>${gone ? ` (+${gone * PTS.journal} очк.)` : ''}.</p>
+    <p class="muted">Сроки возврата: 1 → 3 → 7 → 14 день. Чистое решение отодвигает срок, ошибка возвращает к началу.</p>
+    <div class="row" style="justify-content:center"><button class="main" id="home">К темам</button></div></div>`;
+  document.getElementById('home').onclick = home;
+}
+
+function oopsSummary() {
+  store.oopsDone++; save();
+  app.innerHTML = '<div class="card" style="text-align:center">' +
+    '<h2>🔍 Сеанс Пети разобран</h2>' +
+    '<p>Верных разборов с первой попытки: <b>' + session.okRight + ' из ' + OOPS.size + '</b> · +' + PTS.oops + ' очк. за сеанс.</p>' +
+    '<p class="muted">Главное не счёт, а привычка смотреть на чужое решение и находить слабое место — она же ловит ошибки на контрольной.</p>' +
+    '<div class="row" style="justify-content:center"><button class="main" id="home">К темам</button>' +
+    '<button class="ghost" id="again">Ещё сеанс</button></div></div>';
+  document.getElementById('home').onclick = home;
+  document.getElementById('again').onclick = startOops;
+}
+
 function resultsText() {
   const lines = [`Тренажёр, ${stamp().replace('T', ' ')}`,
-    `очки ${points()} · решено сегодня ${dayN()} · дней подряд ${dayStreak()} · в тренажёре ${hm(secsTotal())}`, ''];
+    `очки ${points()} · решено сегодня ${dayN()} · дней подряд ${dayStreak()} · в тренажёре ${hm(secsTotal())}${store.queue.length || store.journalOut ? ` · ошибник: в очереди ${store.queue.length}, на сегодня ${dueEntries().length}, закрыто ${store.journalOut}${store.oopsDone ? `, сеансов Пети ${store.oopsDone}` : ''}` : ''}`, ''];
   for (const m of MODULES) {
     const s = st(m.id);
     if (!s.solved && !s.sure) continue;
@@ -3049,7 +3326,7 @@ const BACKUP_V = 1;
 const cksum = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
 const backupText = () => {
   const j = JSON.stringify({ b: BACKUP_V, grade: store.grade, stats: store.stats, lessons: store.lessons,
-    days: store.days, mixesDone: store.mixesDone });
+    days: store.days, mixesDone: store.mixesDone, queue: store.queue, journalOut: store.journalOut, oopsDone: store.oopsDone });
   return `algebra7-backup ${cksum(j)} ${j}`;
 };
 function parseBackup(txt) {
