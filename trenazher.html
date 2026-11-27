@@ -140,7 +140,7 @@ const par = x => x < 0 ? `(${fmt(x)})` : fmt(x);
 const fr = (a, b) => `<span class="fr"><span>${a}</span><span>${b}</span></span>`;
 const decimals = x => { const s = String(round6(x)); return s.includes('.') ? s.split('.')[1].length : 0; };
 
-// Accepts "-5", "−5", "0,06", "0.06", "5/2", "2 1/2". Returns {value, form} or null.
+// Accepts "-5", "−5", "0,06", "0.06", "5/2", "2 1/2", "3^2", "(−4)^3". Returns {value, form} or null.
 function parse(str) {
   const s = String(str || '').trim().replace(/[−–—]/g, '-').replace(/,/g, '.').replace(/\s+/g, ' ').replace(/^\+\s*/, '');
   let m;
@@ -150,8 +150,21 @@ function parse(str) {
   }
   if ((m = s.match(/^(-?\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/)))
     return +m[2] === 0 ? null : { value: +m[1] / +m[2], form: 'fraction', num: +m[1], den: +m[2] };
+  // "3^2" — дети пишут степень каретой там, где ждут число. Отрицательное
+  // основание принимаем только в скобках: «−4^2» двусмысленно (−16 или 16?).
+  if ((m = s.match(/^(\()?(-?\d+(?:\.\d+)?)\)?\s*\^\s*(\d{1,2})$/))) {
+    if (m[2].startsWith('-') && !(m[1] !== undefined && s.includes(')'))) return null; // «−4^2» и «(−4^2» — просим скобки с обеих сторон
+    const v = Math.pow(+m[2], +m[3]);
+    return Number.isFinite(v) ? { value: round6(v), form: 'number' } : null;
+  }
   if (/^-?\d+(\.\d+)?$/.test(s)) return { value: +s, form: 'number' };
   return null;
+}
+// Ребёнок, который переносит число, часто пишет всю строку: «x²+4x = 12».
+// Берём то, что справа от последней «=»; без «=» — само число.
+function parseRightSide(str) {
+  const parts = String(str || '').split('=');
+  return parse(parts[parts.length - 1]);
 }
 const signWord = x => x > 0 ? 'положительный' : x < 0 ? 'отрицательный' : 'ноль';
 
@@ -1877,6 +1890,8 @@ function genSqComp() {
     inputHint: 'Запиши оба корня через точку с запятой, например: 2; 5. Порядок не важен.',
     scaffolds: [
       { label: `Шаг 1. Перенеси число в правую часть (знак меняется): x<sup>2</sup> ${bTerm} = ?`,
+        parse: parseRightSide,
+        inputHint: 'Можно вписать всю строку целиком (вида «x² + … = число») — а можно только число справа от «=».',
         answer: -c, hint: `Переносим ${fmt(c)} через «=» — его знак становится противоположным: ${fmt(-c)}.` },
       { label: `Шаг 2. Число при x раздели пополам и возведи в квадрат — это добавка к обеим частям: (${fmt(b)} : 2)<sup>2</sup> = ?`,
         answer: u * u, hint: `Половина от ${fmt(b)} равна ${fmt(u)}. Её квадрат: (${fmt(u)})<sup>2</sup> = ${u * u}.` },
@@ -2340,12 +2355,12 @@ const MODULES = [
           { math: 'Шаг 3. Прибавляем 9 <b>к обеим частям</b>:<br>x<sup>2</sup> + 6x + 9 = −5 + 9', why: 'Добавим только слева — и равенство сломается. Добавляем одинаковое число с обеих сторон. Справа: −5 + 9 = 4.' },
           { math: 'Шаг 4. Слева — готовый квадрат:<br>(x + 3)² = 4', why: 'x<sup>2</sup> + 6x + 9 — это ровно (x + 3)². Уравнение стало простым.' },
           { math: 'Шаг 5. Извлекаем корень — обязательно с «±»:<br>x + 3 = 2 &nbsp;или&nbsp; x + 3 = −2', why: 'Квадрат, равный 4, бывает и у 2, и у −2: 2² = 4 и (−2)² = 4. Отсюда два корня, а не один.' },
-          { try: { label: 'Из x + 3 = 2: x = ?', answer: -1, hint: 'Перенеси 3 вправо, знак меняется: x = 2 − 3.' }, math: 'x + 3 = 2 → x = −1' },
-          { try: { label: 'Из x + 3 = −2: x = ?', answer: -5, hint: 'x = −2 − 3.' }, math: 'x + 3 = −2 → x = −5' },
+          { try: { label: 'Из x + 3 = 2: x = ?', parse: parseRightSide, answer: -1, hint: 'Перенеси 3 вправо, знак меняется: x = 2 − 3.' }, math: 'x + 3 = 2 → x = −1' },
+          { try: { label: 'Из x + 3 = −2: x = ?', parse: parseRightSide, answer: -5, hint: 'x = −2 − 3.' }, math: 'x + 3 = −2 → x = −5' },
           { math: 'Ответ: x = −1 и x = −5', why: 'Проверка подстановкой: (−1)² + 6·(−1) + 5 = 1 − 6 + 5 = 0 ✓; (−5)² + 6·(−5) + 5 = 25 − 30 + 5 = 0 ✓.',
             pic: curvePlot({ f: x => x * x + 6 * x + 5, xr: 8, yr: 12, points: [{ x: -1, y: 0, color: '#2e8b57' }, { x: -5, y: 0, color: '#2e8b57' }] }) } ] },
         { title: 'твоя очередь — реши сам по шагам', problem: 'x<sup>2</sup> − 8x + 12 = 0', steps: [
-          { try: { label: 'Шаг 1. Перенеси 12 вправо: x<sup>2</sup> − 8x = ?', answer: -12, hint: 'Знак меняется: было +12, стало −12.' }, math: 'x<sup>2</sup> − 8x = −12' },
+          { try: { label: 'Шаг 1. Перенеси 12 вправо: x<sup>2</sup> − 8x = ?', parse: parseRightSide, answer: -12, hint: 'Знак меняется: было +12, стало −12.' }, math: 'x<sup>2</sup> − 8x = −12' },
           { try: { label: 'Шаг 2. Половина числа при x равна −4. Её квадрат: (−4)² = ?', answer: 16, hint: '−4 · (−4) = 16 (минус на минус — плюс). Это добавка к обеим частям.' }, math: 'Прибавляем 16 к обеим частям: x<sup>2</sup> − 8x + 16 = −12 + 16' },
           { try: { label: 'Шаг 3. Правая часть: −12 + 16 = ?', answer: 4, hint: '−12 + 16 = 4.' }, math: 'Слева — полный квадрат: (x − 4)² = 4' },
           { math: 'Шаг 4. Извлекаем корень с «±»:<br>x − 4 = 2 &nbsp;или&nbsp; x − 4 = −2', why: 'Квадрат, равный 4, даёт два числа: 2 и −2.' },
@@ -2563,7 +2578,8 @@ const SECTIONS = [
   { grade: 7, title: 'Учебник: функция, формула и график', ids: ['fn'] },
   { grade: 7, title: 'Учебник, глава 2. Степень с натуральным показателем', ids: ['pow'] },
   { grade: 7, title: 'Учебник, глава 7. Одночлены', ids: ['mono', 'monomul', 'sqcube'] },
-  { grade: 8, title: 'Из учебника 8 класса', ids: ['int', 'sqcomp'] },
+  { grade: 7, title: 'По программе 7 класса: числовые промежутки', ids: ['int'] },
+  { grade: 8, title: 'Из учебника 8 класса', ids: ['sqcomp'] },
 ];
 SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
 
@@ -2933,7 +2949,7 @@ function oopsAnswerTask(mod, wrong, why, meta) {
     solution: '<p><b>Правильно:</b> ' + (meta.show || meta.fix) + '</p><p>' + why + '</p>' };
   if (meta.kind === 'num') {
     const T = parse(meta.fix).value;
-    Object.assign(base, { parseAns: parse, same: v => eq(v, T),
+    Object.assign(base, { parseAns: parseRightSide, same: v => eq(v, T),
       diagnose: () => 'Подставь своё число вместо Петиного — не сходится? Пересчитай и сверь знак и запятую.' });
   } else if (meta.kind === 'lin') {
     const T = parseLinear(meta.fix).value;
