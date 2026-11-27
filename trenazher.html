@@ -51,6 +51,17 @@
   .mod-btn.journal { border-color: var(--warn); background: var(--warn-soft); }
   .mod-btn.journal:disabled { border-color: var(--line); }
   .mod-btn.oops { border-color: var(--ok); background: var(--ok-soft); }
+  .powtip { position: relative; display: inline-block; margin-left: 6px; color: var(--accent);
+            font-weight: 700; font-size: 13px; line-height: 1; cursor: help; vertical-align: middle;
+            user-select: none; border: 1.5px solid var(--accent-soft); border-radius: 6px; padding: 2px 5px; }
+  .powtip:hover, .powtip:focus { background: var(--accent-soft); outline: none; }
+  .powtip-box { display: none; position: absolute; left: 0; bottom: 165%; width: 262px;
+                background: #fff; border: 1.5px solid var(--accent); border-radius: 10px; padding: 9px 11px;
+                font-size: 14px; font-weight: 400; color: var(--ink); line-height: 1.45; text-align: left;
+                box-shadow: 0 6px 18px rgba(0,0,0,.15); z-index: 30; white-space: normal; }
+  .powtip:hover .powtip-box, .powtip:focus .powtip-box { display: block; }
+  /* Child clicks into the field → the hint appears without needing to find the chip. */
+  input[type=text]:focus + .powtip .powtip-box { display: block; }
   .badge { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 99px;
            background: var(--accent-soft); color: var(--accent); margin-top: 6px; }
   .badge.done { background: var(--ok-soft); color: var(--ok); }
@@ -166,6 +177,17 @@ function parseRightSide(str) {
   const parts = String(str || '').split('=');
   return parse(parts[parts.length - 1]);
 }
+// Подсказка «как писать степень». POW_EXAMPLES — единый источник правды с парсером:
+// секция F проверок убеждается, что каждый пример здесь parse() даёт ровно заявленное,
+// и что текст подсказки их упоминает (чтобы подпись не разошлась с поведением).
+const POW_EXAMPLES = [['3^2', 9], ['2^5', 32], ['(−4)^2', 16]];
+const POW_TIP = 'Степень пиши через ^: ' + POW_EXAMPLES.map(e => e[0] + ' = ' + e[1]).join(', ') +
+  '. Отрицательное число в основании — в скобках; без скобок «−4^2» тренажёр не поймёт.';
+const powChip = () => `<span class="powtip" tabindex="0">xʸ<span class="powtip-box">${POW_TIP}</span></span>`;
+// Чип уместно только там, где карета действительно принимается парсером поля
+// (parse/parseRightSide). В полях-выражениях (parseLinear/parseEq) и одночленах
+// (parseMono — у него своя подсказка MONO_TYPE) его не показываем.
+const powChipIf = fn => (fn === parse || fn === parseRightSide) ? powChip() : '';
 const signWord = x => x > 0 ? 'положительный' : x < 0 ? 'отрицательный' : 'ноль';
 
 // Number line with an arrow from `from` to `to`.
@@ -2881,7 +2903,7 @@ function lessonScreen(mod) {
   function yourTurn(s, li) {
     nextBox.innerHTML = '';
     li.innerHTML = `<div class="ltry"><div class="step-lbl">✍️ <b>Твоя очередь.</b> ${s.try.label}</div>
-      <input type="text" autocomplete="off"${s.try.wide ? ' style="width:320px"' : ''}> <button class="main">Проверить</button><div class="lfb"></div></div>`;
+      <input type="text" autocomplete="off"${s.try.wide ? ' style="width:320px"' : ''}>${powChipIf(s.try.parse || parse)} <button class="main">Проверить</button><div class="lfb"></div></div>`;
     const inp = li.querySelector('input'), btn = li.querySelector('button'), fb = li.querySelector('.lfb');
     let tries = 0;
     inp.focus();
@@ -3055,12 +3077,12 @@ function renderTask() {
       ${task.predict ? `<div class="step"><div class="step-lbl">${mark()} ${task.predict.label}</div>
         <div class="choices">${task.predict.options.map(o => `<label><input type="radio" name="pred" value="${o}"><span>${o}</span></label>`).join('')}</div></div>` : ''}
       ${scafs.map((sc, j) => `<div class="step"><div class="step-lbl">${mark()} ${sc.label}</div>
-        <input type="text" id="scaf${j}" autocomplete="off"${sc.wide ? ' style="width:320px"' : ''}></div>`).join('')}
+        <input type="text" id="scaf${j}" autocomplete="off"${sc.wide ? ' style="width:320px"' : ''}>${powChipIf(sc.parse || parse)}</div>`).join('')}
       <div class="step"><div class="step-lbl">${multi ? mark() : ''} Ответ${task.formHint ? ` <span class="muted">(${task.formHint})</span>` : ''}:</div>
         ${task.options
           ? `<div class="choices">${task.options.map(o => `<label><input type="radio" name="ans" value="${o}"><span>${o}</span></label>`).join('')}</div>`
-          : `<input type="text" id="ans" autocomplete="off"${task.wide ? ' style="width:320px"' : ''}>`}</div>
-      ${task.check ? `<div class="step"><div class="step-lbl">${mark()} ${task.check.label}</div><input type="text" id="chk" autocomplete="off"></div>` : ''}
+          : `<input type="text" id="ans" autocomplete="off"${task.wide ? ' style="width:320px"' : ''}>${task.form ? '' : powChipIf(task.parseAns || parse)}`}</div>
+      ${task.check ? `<div class="step"><div class="step-lbl">${mark()} ${task.check.label}</div><input type="text" id="chk" autocomplete="off">${powChipIf(parse)}</div>` : ''}
       <div class="row" id="buttons">
         <button class="main" data-conf="sure">Проверить — уверен</button>
         <button class="ghost" data-conf="doubt">Проверить — сомневаюсь</button>
