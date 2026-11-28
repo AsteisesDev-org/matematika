@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Алгебра 7–8: тренажёр</title>
+<title>Алгебра и геометрия 7–8: тренажёр</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233f6ad8'/%3E%3Ctext x='29' y='46' font-family='Georgia,serif' font-size='40' font-style='italic' fill='white' text-anchor='middle'%3Ex%3C/text%3E%3Ctext x='49' y='28' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3E2%3C/text%3E%3C/svg%3E">
 <style>
   :root {
@@ -1937,6 +1937,272 @@ function genSqComp() {
   };
 }
 
+// ---------- геометрия: равенство треугольников ----------
+// Ответ — соответствие вершин: «C₁A₁B₁» читается по порядку токенов (A↔C₁, B↔A₁, C↔B₁),
+// поэтому порядок и есть ответ — по алфавиту его не переставляем.
+const TRI_NAME = ['A', 'B', 'C'];
+const TRI_NAME1 = ['A₁', 'B₁', 'C₁'];
+const TRI_P = '₁';                               // вершины второго треугольника: A₁, B₁, C₁ — индекс у всех один
+const TRI_EDGES = ['AB', 'BC', 'CA'];            // сторона i — между вершинами i и (i+1)%3
+const TRI_EDGES1 = ['A₁B₁', 'B₁C₁', 'C₁A₁'];
+const TRI_VERTS = [[0, 1], [1, 2], [2, 0]];
+const TRI_EDGE = { '0,1': 0, '1,0': 0, '1,2': 1, '2,1': 1, '2,0': 2, '0,2': 2 };
+const TRI_INC = [[0, 2], [0, 1], [1, 2]];        // стороны, сходящиеся при A, при B, при C
+const TRI_PERM = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+const TRI_LAT = { 'а': 'A', 'в': 'B', 'с': 'C' };  // русские буквы с той же клавиатуры — те же вершины
+
+const triTok = (rec, i) => rec.slice(i * 2, i * 2 + 2);
+// Запись △ABC = △B₁C₁A₁ означает A↔B₁, B↔C₁, C↔A₁: i-й токен — образ вершины i.
+const triAns = perm => perm.map(p => TRI_NAME[p] + TRI_P).join('');
+const triOK = s => s[0] + s[1] > s[2] && s[0] + s[2] > s[1] && s[1] + s[2] > s[0];
+const triArea = s => { const p = (s[0] + s[1] + s[2]) / 2; return Math.sqrt(Math.max(p * (p - s[0]) * (p - s[1]) * (p - s[2]), 0)); };
+const triFat = s => 2 * triArea(s) / Math.max(...s) >= 2.5;   // фигура не должна ложиться в линию
+const triRank = s => { const r = {}; [...s].sort((a, b) => a - b).forEach((L, i) => { if (!r[L]) r[L] = i + 1; }); return r; };
+
+// Стороны второго треугольника, которые получает первый при соответствии perm.
+function triSides2(s1, perm) {
+  const s2 = [];
+  s2[TRI_EDGE[perm[0] + ',' + perm[1]]] = s1[0];
+  s2[TRI_EDGE[perm[1] + ',' + perm[2]]] = s1[1];
+  s2[TRI_EDGE[perm[2] + ',' + perm[0]]] = s1[2];
+  return s2;
+}
+const triMatch = (s1, s2) => TRI_PERM.filter(p => triSides2(s1, p).every((v, i) => v === s2[i]));
+
+// Буквы вершин и подстрочники приводим к одному виду: ребёнок печатает и латиницу, и русские
+// буквы с той же клавиатуры, и «A1» вместо «A₁».
+function triNorm(str) {
+  return String(str || '').toLowerCase()
+    .replace(/[₀-₉]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x2080 + 0x30))
+    .replace(/[１-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 0x30))
+    .replace(/[′ʹ´’']/g, '1')                // A′ — та же вершина со штрихом, что и A₁
+    .replace(/[Δδ∆△]/g, '')                // «△C₁A₁B₁» — тот же знак, что печатают наши подписи
+    .replace(/треугольник[а-я]*\s*/g, '');
+}
+const triLetter = ch => TRI_LAT[ch] || ch.toUpperCase();
+
+// Принимаем «C₁A₁B₁», «c1a1b1», «C1, A1, B1», «ΔABC = ΔC₁A₁B₁»; порядок токенов значим.
+function parseTri(str) {
+  // «△ABC = △C₁A₁B₁» — читаем то, что после знака равенства; если после него пусто
+  // («a1b1c1 =»), ребёнок ответил до знака и берём первую часть.
+  const parts = triNorm(str).split(/[=:]/);
+  let s = (parts[parts.length - 1].trim() || parts[0]).trim();
+  const re = /([abcавс])\s*1/g;                 // индекс всегда ₁: «A₂» — не вершина этого рисунка
+  let m, out = '';
+  const seen = new Set();
+  while ((m = re.exec(s))) {
+    const letter = triLetter(m[1]);
+    if (seen.has(letter)) return null;          // та же вершина дважды — соответствия не будет
+    seen.add(letter);
+    out += letter + TRI_P;
+  }
+  if (out.length !== 6) return null;            // ровно три токена
+  if (s.replace(re, '').replace(/[\s,;.:()\-–—]/g, '')) return null;   // вокруг токенов мусора нет
+  return { value: out, form: 'tri' };
+}
+// Одна вершина второго треугольника: «B₁», «b1», «ΔB₁» — для шагов разбора.
+function parseVert(str) {
+  const m = triNorm(str).trim().match(/^([abcавс])\s*1$/);
+  return m ? { value: triLetter(m[1]) + TRI_P, form: 'vert' } : null;
+}
+
+// ---------- рисунок: два треугольника с метками равных сторон ----------
+function triCoords([ab, bc, ca]) {         // A в начале, B по оси x, C над прямой AB
+  const x = (ca * ca + ab * ab - bc * bc) / (2 * ab);
+  return [[0, 0], [ab, 0], [x, -Math.sqrt(Math.max(ca * ca - x * x, 0))]];
+}
+function triFit(pts, slot, flip) {
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+  const k = Math.min(slot.w / w, slot.h / h);
+  const mx = (Math.max(...xs) + Math.min(...xs)) / 2, my = (Math.max(...ys) + Math.min(...ys)) / 2;
+  return pts.map(([px, py]) => [slot.x + slot.w / 2 + (px - mx) * k * (flip ? -1 : 1),
+    slot.y + slot.h / 2 + (py - my) * k]);
+}
+function triMark(p, q, n) {                // n коротких штрихов через середину стороны
+  const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+  const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+  const ux = (q[0] - p[0]) / L, uy = (q[1] - p[1]) / L, nx = -uy, ny = ux;
+  let s = '';
+  for (let i = 0; i < n; i++) {
+    const off = (i - (n - 1) / 2) * 6, cx = mx + ux * off, cy = my + uy * off;
+    s += `<line x1="${(cx - nx * 6).toFixed(1)}" y1="${(cy - ny * 6).toFixed(1)}" x2="${(cx + nx * 6).toFixed(1)}" y2="${(cy + ny * 6).toFixed(1)}" stroke="#c0392b" stroke-width="2"/>`;
+  }
+  return s;
+}
+function triTag(pt, cen, text, color, style = '') {   // подпись чуть наружу от центра фигуры
+  const dx = pt[0] - cen[0], dy = pt[1] - cen[1], L = Math.hypot(dx, dy) || 1;
+  return `<text x="${(pt[0] + dx / L * 16).toFixed(1)}" y="${(pt[1] + dy / L * 16 + 5).toFixed(1)}" font-size="15"${style} text-anchor="middle" fill="${color}">${text}</text>`;
+}
+function triFig(sides, names, o) {
+  const pts = triFit(triCoords(sides), o.slot, o.flip);
+  const cen = [(pts[0][0] + pts[1][0] + pts[2][0]) / 3, (pts[0][1] + pts[1][1] + pts[2][1]) / 3];
+  let s = `<polygon points="${pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="${o.fill}" stroke="${o.color}" stroke-width="2"/>`;
+  TRI_VERTS.forEach((e, i) => {
+    const p = pts[e[0]], q = pts[e[1]];
+    if (o.ticks) s += triMark(p, q, o.ticks[i]);
+    if (o.lens && o.lens[i]) s += triTag([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], cen, o.lens[i], o.color);
+  });
+  names.forEach((nm, i) => { s += triTag(pts[i], cen, nm, '#1d2433', ' font-style="italic"'); });
+  return s;
+}
+// Одинаковое число штрихов — у равных сторон, как в рисунках учебника.
+// o.ticks — штрихи по рангу длины; o.lens — true (числа) или [подписи первого, подписи второго].
+function triPair(s1, s2, o = {}) {
+  const rk = o.rank || triRank(s1);
+  const tk = ss => ss.map(L => rk[L] || 0);
+  const both = Array.isArray(o.lens);
+  return `<svg viewBox="0 0 620 250" width="620" height="250" xmlns="http://www.w3.org/2000/svg" style="border:1px solid #d8dce6;border-radius:8px">` +
+    triFig(s1, TRI_NAME, { slot: { x: 34, y: 34, w: 240, h: 178 }, color: '#3f6ad8', fill: '#f4f8ff',
+      ticks: o.ticks ? tk(s1) : null, lens: o.lens ? (both ? o.lens[0] : s1.map(L => L + ' см')) : null }) +
+    triFig(s2, TRI_NAME1, { slot: { x: 346, y: 34, w: 240, h: 178 }, color: '#333', fill: '#fff', flip: o.flip,
+      ticks: o.ticks ? tk(s2) : null, lens: o.lens ? (both ? o.lens[1] : s2.map(L => L + ' см')) : null }) +
+    '</svg>';
+}
+
+// ---------- третий признак равенства треугольников (§ 20) ----------
+function genGeoSSS() {
+  let s1;
+  do { s1 = [ri(3, 9), ri(3, 9), ri(3, 9)]; }
+  while (new Set(s1).size < 3 || !triOK(s1) || !triFat(s1));
+  const rk = triRank(s1);
+  const perm = pick(TRI_PERM), s2 = triSides2(s1, perm), ans = triAns(perm);
+  // Единственность соответствия держится на том, что стороны разные. Сузят диапазон —
+  // пусть генератор упадёт здесь, а не молча выдаст задачу с двумя верными ответами.
+  if (triMatch(s1, s2).length !== 1) throw new Error('SSS: соответствие не единственное');
+  const flip = pick([true, false]);
+  const at = (s, v) => TRI_INC[v].map(k => s[k]);                 // две стороны при вершине v
+  const img = (rec, i) => TRI_NAME.indexOf(triTok(rec, i)[0]);    // образ вершины i в записи rec
+  const sm = L => L + ' см';
+  const sh = L => rk[L] + ' ' + pl(rk[L], 'штрих', 'штриха', 'штрихов');
+  const given = (names, s) => names.map((nm, i) => `${nm} = ${s[i]} см`).join(', ');
+  const pairs = (a, b) => a.map((L, i) => `${TRI_EDGES[i]} = ${TRI_EDGES1[b.indexOf(L)]} = ${L} см`).join(', ');
+  const kind = pick(['corr', 'corr', 'marks', 'verdict', 'missing', 'thirdpair', 'sticks']);
+  const INPUT = 'Три вершины по порядку: первая — какая соответствует A, вторая — B, третья — C. Можно C₁A₁B₁, можно C1A1B1.';
+
+  if (kind === 'corr' || kind === 'marks') {
+    const marks = kind === 'marks', u = marks ? sh : sm;
+    const fig = triPair(s1, s2, marks ? { ticks: true, rank: rk, flip } : { lens: true, flip });
+    const how = marks ? 'На рисунке равные стороны отмечены одинаковым числом штрихов.'
+      : `Дано: ${given(TRI_EDGES, s1)};<br>${given(TRI_EDGES1, s2)}.`;
+    const why = TRI_NAME.map((nm, i) => {
+      const a = at(s1, i), b = at(s2, img(ans, i));
+      return `При ${nm} сходятся ${u(a[0])} и ${u(a[1])} — такие же две стороны только при <b>${triTok(ans, i)}</b> (${u(b[0])} и ${u(b[1])}).`;
+    }).join('<br>');
+    const back = perm.map((p, i) => `${TRI_EDGES[i]} ↔ ${TRI_EDGES1[TRI_EDGE[perm[i] + ',' + perm[(i + 1) % 3]]]}`).join(', ');
+    return {
+      q: `<p>${how}</p>Треугольники равны по трём сторонам. Запиши, какому треугольнику равен △ABC:<div>${fig}</div>`,
+      answer: ans, parseAns: parseTri, same: v => v === ans, wide: true, inputHint: INPUT,
+      predict: { label: 'Сначала прикинь: какая вершина второго треугольника соответствует A?',
+        options: TRI_NAME1, correct: triTok(ans, 0), agree: (v, o) => triTok(v, 0) === o },
+      diagnose(v) {
+        // Объяснение ищем по первой вершине, где две её стороны не сходятся: там цитаты
+        // обязаны различаться, иначе подсказка утверждает неверное.
+        for (let i = 0; i < 3; i++) {
+          if (triTok(v, i) === triTok(ans, i)) continue;
+          const a = at(s1, i), b = at(s2, img(v, i));
+          return `При ${TRI_NAME[i]} сходятся ${u(a[0])} и ${u(a[1])}, а при ${triTok(v, i)} — ${u(b[0])} и ${u(b[1])}. Значит, ${triTok(v, i)} на месте ${TRI_NAME[i]} не стоит.`;
+        }
+        return 'Сверяй вершину по двум её сторонам — по одной букве не выходит.';
+      },
+      solution: `<p>${marks ? 'Равные стороны отмечены равным числом штрихов.' : 'Вершину определяют две её стороны.'}</p>
+        <p>${why}</p><p>Значит, <b>△ABC = △${ans}</b>.</p>
+        <p class="muted">Проверка по парам сторон: ${back} — все три пары равны ✓</p>${fig}`
+    };
+  }
+
+  if (kind === 'verdict') {
+    const equal = pick([true, true, false]);
+    let sv = s2.slice();
+    if (!equal) {
+      for (;;) {
+        const i = ri(0, 2), t = sv.slice();
+        t[i] += pick([-2, -1, 1, 2]);
+        if (t[i] >= 2 && new Set(t).size === 3 && triOK(t) && triFat(t)) { sv = t; break; }
+      }
+    }
+    const fig = triPair(s1, sv, { lens: true, flip });
+    const extra = sv.find(L => !s1.includes(L));
+    const sorted = s => s.slice().sort((a, b) => a - b).join(', ');
+    const yes = equal ? 'равны' : 'не равны';
+    return {
+      q: `<p>${given(TRI_EDGES, s1)};<br>${given(TRI_EDGES1, sv)}.</p>Равны ли эти треугольники?<div>${fig}</div>`,
+      answer: yes, options: ['равны', 'не равны'], same: v => v === yes,
+      diagnose(v) {
+        if (equal) return `Стороны первого: ${sorted(s1)}. Стороны второго: ${sorted(sv)} — те же три числа, три пары равных сторон набираются.`;
+        return `Во втором треугольнике есть сторона ${extra} см, а в первом такой нет (стороны ${sorted(s1)} см). Трёх равных пар не выходит.`;
+      },
+      solution: equal
+        ? `<p>Собираем пары по длинам: ${pairs(s1, sv)}.</p>
+           <p>Все три стороны одного равны трём сторонам другого ⇒ треугольники <b>равны</b> (запись: △ABC = △${ans}).</p>${fig}`
+        : `<p>Стороны первого: ${sorted(s1)} см, стороны второго: ${sorted(sv)} см.</p>
+           <p>Сторона ${extra} см в первом не встречается — <b>по третьему признаку равенство утверждать нельзя</b>.</p>${fig}`
+    };
+  }
+
+  if (kind === 'missing') {
+    const fig = triPair(s1, s1, { lens: [s1.map(sm), [sm(s1[0]), sm(s1[1]), '?']], flip });
+    const per = s1[0] + s1[1] + s1[2];
+    return {
+      q: `<p>△ABC: ${given(TRI_EDGES, s1)}. Известно, что A₁B₁ = ${s1[0]} см и B₁C₁ = ${s1[1]} см.</p>
+        Сколько сантиметров должна быть сторона C₁A₁, чтобы △ABC = △A₁B₁C₁ по третьему признаку?<div>${fig}</div>`,
+      answer: s1[2],
+      predict: { label: 'Прикинь: C₁A₁ будет больше или меньше, чем A₁B₁?', options: ['больше', 'меньше'],
+        correct: s1[2] > s1[0] ? 'больше' : 'меньше', ref: s1[0] },
+      check: { label: 'Проверка: посчитай периметр △A₁B₁C₁ с твоим числом', compute: v => v + s1[0] + s1[1], target: per },
+      diagnose(v) {
+        if (v === s1[0] || v === s1[1]) return `Ты повторил другую сторону. В записи △ABC = △A₁B₁C₁ сторона C₁A₁ соответствует CA, а CA = ${s1[2]} см.`;
+        return `C₁A₁ соответствует CA — значит, она должна быть равна ${s1[2]} см, а не ${fmt(v)} см.`;
+      },
+      solution: `<p>В записи △ABC = △A₁B₁C₁ буквы уже стоят по соответствию: C₁ ↔ C, A₁ ↔ A, значит C₁A₁ — это сторона CA.</p>
+        <p>CA = ${s1[2]} см, поэтому <b>C₁A₁ = ${s1[2]} см</b>.</p>
+        <p class="muted">Проверка: периметр второго = ${s1[0]} + ${s1[1]} + ${s1[2]} = ${per} см — как у первого ✓</p>${fig}`
+    };
+  }
+
+  if (kind === 'thirdpair') {
+    const miss = ri(0, 2), gv = [0, 1, 2].filter(i => i !== miss);
+    const vert = TRI_VERTS[gv[0]].find(v => TRI_VERTS[gv[1]].includes(v));
+    const right = `${TRI_EDGES[miss]} = ${TRI_EDGES1[miss]}`;
+    const angle = `∠${TRI_NAME[vert]} = ∠${TRI_NAME1[vert]}`;
+    const none = 'больше ничего не нужно';
+    return {
+      q: `Дано: ${gv.map(i => `${TRI_EDGES[i]} = ${TRI_EDGES1[i]}`).join(' и ')}. Чего не хватает, чтобы утверждать равенство треугольников по <b>третьему</b> признаку?`,
+      answer: right, options: [right, angle, none], same: v => v === right,
+      diagnose(v) {
+        if (v === angle) return `Угол между двумя сторонами — это <b>второй</b> признак. Третий работает только со сторонами, и не хватает как раз ${right}.`;
+        if (v === none) return 'Двух пар сторон мало: вторую пару можно «раскрыть» под другим углом — треугольники перестанут быть равными.';
+        return `Третий признак — про три пары сторон. Дано две, не хватает ${right}.`;
+      },
+      solution: `<p>Третий признак: три стороны одного равны трём сторонам другого. Дано две пары — ${gv.map(i => `${TRI_EDGES[i]} = ${TRI_EDGES1[i]}`).join(', ')}.</p>
+        <p>Не хватает третьей пары: <b>${right}</b>.</p>
+        <p class="muted">Равенство угла ${angle} — это уже другой признак (второй), а не третий.</p>`
+    };
+  }
+
+  const a = ri(2, 4), b = ri(a + 1, 6), bad = [a, b, a + b];
+  const txt = s => s.slice().sort((x, y) => x - y).map(L => L + ' см').join(', ');
+  const badTxt = txt(bad);
+  let g1, g2;
+  do { g1 = [ri(3, 9), ri(3, 9), ri(3, 9)]; }
+  while (new Set(g1).size < 3 || !triOK(g1) || !triFat(g1) || txt(g1) === badTxt);
+  do { g2 = [ri(3, 9), ri(3, 9), ri(3, 9)]; }
+  while (new Set(g2).size < 3 || !triOK(g2) || !triFat(g2) || txt(g2) === badTxt || txt(g2) === txt(g1));
+  const map = {}; [g1, g2, bad].forEach(s => { map[txt(s)] = s; });
+  return {
+    q: 'Какие три палочки не сложатся в треугольник?',
+    answer: badTxt, options: shuffle([txt(g1), txt(g2), badTxt]), same: v => v === badTxt,
+    diagnose(v) {
+      const s = map[v] || g1, d = s.slice().sort((x, y) => x - y);
+      if (s === bad) return `${d[0]} + ${d[1]} = ${d[0] + d[1]} — столько же, сколько третья палочка. Они лягут в одну линию, треугольника не будет.`;
+      return `Проверь самую длинную: ${d[0]} + ${d[1]} = ${d[0] + d[1]} см, а третья ${d[2]} см — меньше. Такой треугольник соберётся.`;
+    },
+    solution: `<p>Треугольник существует, только если каждая сторона меньше суммы двух других. Хватит проверить самую длинную.</p>
+      <p>${badTxt}: ${a} + ${b} = ${a + b} см, а третья палочка тоже ${a + b} см — значит, треугольника из них <b>нет</b>, палочки лягут в одну линию.</p>
+      <p class="muted">У двух других наборов самая длинная сторона меньше суммы двух остальных — они существуют. Без треугольника нельзя говорить и о его равенстве.</p>`
+  };
+}
+
 // ---------- modules ----------
 const MODULES = [
   { id: 'neg', title: 'Сложение и вычитание отрицательных', short: 'Отрицательные', gen: genNeg,
@@ -2531,6 +2797,61 @@ const MODULES = [
         <li><b>Обратно:</b> раздели числитель на знаменатель с остатком. ${fr(7, 4)} → 7 : 4 = 1 (ост. 3) → 1${fr(3, 4)}.</li>
         <li>В поле смешанное число пиши <b>через пробел</b>: 1 3/4.</li></ul>` },
     oops: [['2½ = 4/2', '4/2 = 2 — половинка потерялась. 2 · 2 = 4 половинки и ещё 1: <b>5/2</b>.']] },
+  { id: 'gsss', subj: 'geo', title: 'Третий признак равенства треугольников', short: 'Геометрия: 3-й признак', gen: genGeoSSS,
+    lesson: {
+      hook: 'Треугольник — единственная фигура, которую нельзя скривить: задал три стороны — и чертёж получится только один. Поэтому трёх равных пар сторон хватает, чтобы утверждать равенство. Это <b>§ 20</b>.',
+      examples: [
+        { title: 'разбираем вместе', problem: 'AB = A₁B₁, BC = B₁C₁, CA = C₁A₁. Почему △ABC = △A₁B₁C₁?', steps: [
+          { math: 'Три пары равных сторон: AB = A₁B₁, BC = B₁C₁, CA = C₁A₁.', why: 'Ровно это и говорит третий признак: <b>если три стороны одного треугольника равны трём сторонам другого, треугольники равны</b>.' },
+          { think: true, math: 'Приложим △ABC к △A₁B₁C₁ стороной AB к A₁B₁.', why: 'AB = A₁B₁, значит эти отрезки совместятся целиком: A встанет на A₁, B на B₁.' },
+          { math: 'Где может встать C? Нужно сразу два расстояния: от A₁ — как CA, от B₁ — как CB.', why: 'Одно расстояние — это целый круг. Два расстояния — всего <b>две</b> точки: по одну и по другую сторону от прямой A₁B₁.', pic: triPair([5, 7, 4], [5, 7, 4], { ticks: true }) },
+          { math: 'Обе точки дают один и тот же треугольник — вторая это зеркало первой.', why: 'Стороны те же, значит фигура та же, только перевёрнутая. Поэтому трёх сторон хватает, чтобы треугольник определился однозначно, — и сравнивать его можно только с одним другим.' },
+          { math: '△ABC = △A₁B₁C₁', why: 'Штрихи на рисунке показывают пары: у одинаковых сторон одинаковое число штрихов.' },
+          { try: { label: 'Запиши это равенство целиком: △ABC = △…', parse: parseTri, answer: 'A₁B₁C₁', same: v => v === 'A₁B₁C₁', wide: true,
+                   inputHint: 'Три вершины по порядку: первая — какая соответствует A, вторая — B, третья — C. Можно A₁B₁C₁, можно A1B1C1.',
+                   hint: 'В этом примере буквы уже стоят по порядку соответствия.' },
+            math: '△ABC = △A₁B₁C₁', why: 'Запись △ABC = △A₁B₁C₁ означает A ↔ A₁, B ↔ B₁, C ↔ C₁. Порядок букв в такой записи — не украшение, а условие.' }] },
+        { title: 'буквы перепутаны', problem: 'AB = 5 см, BC = 7 см, CA = 4 см; A₁B₁ = 4 см, B₁C₁ = 5 см, C₁A₁ = 7 см', steps: [
+          { math: 'Вершину определяют две её стороны.', why: 'Поэтому соответствие ищут так: смотрят, какие две стороны сходятся при вершине, и ищут в другом треугольнике вершину с теми же двумя сторонами.' },
+          { try: { label: 'При A сходятся AB = 5 см и CA = 4 см. При какой вершине второго треугольника сходятся 5 см и 4 см?',
+                   parse: parseVert, answer: 'B₁', same: v => v === 'B₁',
+                   inputHint: 'Одна буква с цифрой: B₁ или b1.', hint: 'A₁B₁ = 4 см и B₁C₁ = 5 см — обе эти стороны при B₁.' },
+            math: 'При B₁: A₁B₁ = 4 см и B₁C₁ = 5 см ⇒ A ↔ B₁' },
+          { try: { label: 'При B сходятся 5 см и 7 см. Какая вершина второго треугольника подходит?',
+                   parse: parseVert, answer: 'C₁', same: v => v === 'C₁',
+                   inputHint: 'Одна буква с цифрой: C₁ или c1.', hint: 'B₁C₁ = 5 см и C₁A₁ = 7 см — они при C₁.' },
+            math: 'B ↔ C₁' },
+          { try: { label: 'Осталась C. Собери всё равенство: △ABC = △…', parse: parseTri, answer: 'B₁C₁A₁', same: v => v === 'B₁C₁A₁', wide: true,
+                   inputHint: 'Первая буква — образ A, вторая — образ B, третья — образ C.', hint: 'Мы нашли: A ↔ B₁, B ↔ C₁, значит C ↔ A₁.' },
+            math: '△ABC = △B₁C₁A₁' },
+          { math: 'Проверка: AB ↔ B₁C₁ = 5 см ✓, BC ↔ C₁A₁ = 7 см ✓, CA ↔ A₁B₁ = 4 см ✓', why: 'Каждая пара сторон совпала — так и проверяют записанное соответствие.' }] },
+        { title: 'как читать рисунок', problem: 'На рисунке равные стороны отмечены одинаковым числом штрихов. Какому треугольнику равен △ABC?', steps: [
+          { math: 'Там, где один штрих, — самые короткие стороны; где три штриха — самые длинные.', why: 'Штрихи и есть знак равенства: сторона с двумя штрихами равна стороне с двумя штрихами.', pic: triPair([6, 4, 5], [4, 5, 6], { ticks: true, flip: true }) },
+          { try: { label: 'При A сходятся стороны с 3 и 2 штрихами. При какой вершине второго треугольника тоже 3 и 2?',
+                   parse: parseVert, answer: 'C₁', same: v => v === 'C₁',
+                   inputHint: 'Одна буква с цифрой: C₁ или c1.', hint: 'C₁A₁ — 3 штриха, B₁C₁ — 2 штриха: обе при C₁.' },
+            math: 'A ↔ C₁' },
+          { try: { label: 'Запиши всё равенство целиком: △ABC = △…', parse: parseTri, answer: 'C₁A₁B₁', same: v => v === 'C₁A₁B₁', wide: true,
+                   inputHint: 'Первая буква — образ A, вторая — образ B, третья — образ C.', hint: 'A ↔ C₁, B ↔ A₁, C ↔ B₁.' },
+            math: '△ABC = △C₁A₁B₁' }] },
+        { title: 'двух пар мало', problem: 'AB = A₁B₁ и BC = B₁C₁. Хватит ли этого для третьего признака?', steps: [
+          { math: 'Равны две пары сторон: AB = A₁B₁, BC = B₁C₁.', why: 'Третья сторона пока никак не связана с остальными.' },
+          { think: true, math: 'Две палочки на шарнире можно раскрыть по-разному.', why: 'Угол между ними меняется — вместе с ним меняется и третья сторона. Значит, по двум парам сторон треугольник не задан.' },
+          { try: { label: 'Значит, двух пар сторон достаточно, чтобы утверждать равенство по третьему признаку?',
+                   parse: parseWord, answer: 'нет', same: v => v === 'нет',
+                   inputHint: 'Ответь словом: да или нет.', hint: 'Третий признак — про три пары сторон.' },
+            math: 'Нет: нужна третья пара — CA = C₁A₁' }] }],
+      rule: `<ul><li><b>Третий признак (§ 20):</b> если три стороны одного треугольника равны трём сторонам другого, треугольники равны.</li>
+        <li><b>Запись △ABC = △C₁A₁B₁ — это соответствие:</b> первая буква — образ A, вторая — образ B, третья — образ C. Написал не по порядку — написал уже другое утверждение.</li>
+        <li><b>Как искать:</b> вершину определяют две её стороны. Нашёл в другом треугольнике вершину с такими же двумя сторонами — это пара.</li>
+        <li><b>Двух пар сторон мало.</b> Равенство угла между сторонами — это второй признак, а не третий.</li>
+        <li>Сравнивать можно только существующие треугольники: <b>самая длинная сторона меньше суммы двух других</b>.</li></ul>` },
+    oops: [['△ABC = △A₁B₁C₁, потому что AB = A₁B₁ и BC = B₁C₁',
+            'Двух пар сторон мало: третий признак — это <b>три</b> пары. Нужна ещё CA = C₁A₁. Без неё угол между известными сторонами может быть разным, и треугольники получатся неравными.'],
+           ['AB = 5 см, BC = 7 см, CA = 4 см; A₁B₁ = 4 см, B₁C₁ = 5 см, C₁A₁ = 7 см. Петя: △ABC = △A₁B₁C₁',
+            'При A сходятся 5 см и 4 см, а при A₁ — 4 см и 7 см: это не та вершина. Правильно <b>△ABC = △B₁C₁A₁</b>: тогда AB = B₁C₁ = 5 см, BC = C₁A₁ = 7 см, CA = A₁B₁ = 4 см.'],
+           ['Треугольники со сторонами 3 см, 4 см, 8 см и 3 см, 4 см, 8 см равны по третьему признаку',
+            'Треугольника со сторонами 3, 4 и 8 не существует: 3 + 4 = 7, а 7 &lt; 8. Сравнивать нечего — сначала проверяют, соберётся ли фигура.']] },
 ];
 const MIX = { id: 'mix-all', title: 'Перемешка', short: 'Перемешка', size: 10 };
 const JOURNAL = { id: 'journal', title: 'Ошибник', short: 'Ошибник' };
@@ -2564,6 +2885,9 @@ const OOPS_META = {
   pct: [{ kind: 'num', fix: '9' }],
   unk: [{ kind: 'num', fix: '5' }],
   mix: [{ kind: 'num', fix: '5/2' }],
+  gsss: [{ kind: 'verdict', diag: 'Посчитай, сколько пар равных сторон Петя использовал: по третьему признаку их должно быть три.' },
+    { kind: 'tri', fix: 'B₁C₁A₁', ask: 'В Петиной записи перепутано соответствие вершин. Допиши равенство: △ABC = △…' },
+    { kind: 'verdict', diag: 'Сначала проверь, существует ли такой треугольник: сравни самую длинную сторону с суммой двух других.' }],
 };
 const OOPS_TRAPS = {
   neg: [['−3 + (−7) = −10', 'Долг плюс долг: модули складываем, знак остаётся минусом ✓'],
@@ -2585,6 +2909,12 @@ const OOPS_TRAPS = {
   pct: [['10% от 45 = 4,5', '45 : 100 · 10 = 4,5 ✓']],
   unk: [['45 : x = 9, x = 5', 'Проверка: 45 : 5 = 9 ✓']],
   mix: [['1½ = 3/2', '1 целая — это 2 половинки, ещё одна → 3/2 ✓']],
+  gsss: [['Если три стороны одного треугольника равны трём сторонам другого, треугольники равны',
+      'Это и есть третий признак ✓'],
+    ['Треугольника со сторонами 2 см, 3 см и 6 см не существует',
+      '2 + 3 = 5, а 5 &lt; 6: самая длинная не меньше суммы двух других ✓'],
+    ['Из палочек 5 см, 6 см и 7 см сложится треугольник',
+      '5 + 6 = 11 &gt; 7 — каждая сторона меньше суммы двух других ✓']],
 };
 
 // Topic numbers follow the course: the 5–6 grade base first, then the textbook, then
@@ -2594,6 +2924,12 @@ const OOPS_TRAPS = {
 // The order below is what numbers the topics — changing it renumbers them for the child.
 // `grade` drives the tab in home(): 7 and 8 are shown on separate tabs but keep one
 // running topic number, so a topic never renumbers when the child switches tabs.
+// `subj` is the level above it: Алгебра and Геометрия are separate tabs, and numbers are
+// counted inside a subject — algebra keeps 1–17, geometry starts at its own 1.
+const SUBJECTS = [
+  { id: 'alg', title: 'Алгебра' },
+  { id: 'geo', title: 'Геометрия' },
+];
 const SECTIONS = [
   { grade: 7, title: 'Повторение 5–6 класса', ids: ['dmul', 'ddiv', 'pct', 'frac', 'mix', 'neg', 'unk'] },
   { grade: 7, title: 'Учебник: выражения, тождества, уравнения', ids: ['brk', 'eq', 'eqw'] },
@@ -2602,8 +2938,19 @@ const SECTIONS = [
   { grade: 7, title: 'Учебник, глава 7. Одночлены', ids: ['mono', 'monomul', 'sqcube'] },
   { grade: 7, title: 'По программе 7 класса: числовые промежутки', ids: ['int'] },
   { grade: 8, title: 'Из учебника 8 класса', ids: ['sqcomp'] },
+  { subj: 'geo', grade: 7, title: 'Учебник геометрии, § 20. Равенство треугольников', ids: ['gsss'] },
 ];
-SECTIONS.flatMap(s => s.ids).forEach((id, i) => { MODULES.find(m => m.id === id).n = i + 1; });
+const secSubj = s => s.subj || 'alg';
+for (const sb of SUBJECTS) {
+  SECTIONS.filter(s => secSubj(s) === sb.id).flatMap(s => s.ids).forEach((id, i) => {
+    const m = MODULES.find(x => x.id === id); m.n = i + 1; m.subj = sb.id;
+  });
+}
+// Вкладки класса строятся из секций: у предмета только те классы, где есть темы.
+const gradesOf = sb => [...new Set(SECTIONS.filter(s => secSubj(s) === sb).map(s => s.grade))].sort((a, b) => a - b);
+// Класс ребёнка не перезаписывается ради чужого предмета: 8-й класс алгебры останется 8-м,
+// когда в геометрии появятся свои темы.
+const viewGrade = (sb, g) => { const gs = gradesOf(sb); return gs.includes(g) ? g : gs[0]; };
 
 // ---------- storage ----------
 const KEY = 'algebra7-trainer-v1';
@@ -2620,6 +2967,7 @@ function normalizeStore(s = store) {
   s.oopsDone = Number(s.oopsDone) || 0;
   s.queue = Array.isArray(s.queue) ? s.queue : [];
   s.grade = s.grade === 8 ? 8 : 7; // anything else hides every topic card
+  s.subject = s.subject === 'geo' ? 'geo' : 'alg'; // верхний уровень над классом; без него — алгебра
   for (const id of Object.keys(s.stats)) {
     const t = s.stats[id];
     if (!t || typeof t !== 'object') { delete s.stats[id]; continue; }
@@ -2748,15 +3096,19 @@ function home() {
   const all = Object.values(store.stats);
   const sure = all.reduce((s, x) => s + x.sure, 0), sureWrong = all.reduce((s, x) => s + x.sureWrong, 0);
   const caught = all.reduce((s, x) => s + x.selfCaught, 0);
+  const subj = SUBJECTS.find(x => x.id === store.subject) || SUBJECTS[0];
+  const vg = viewGrade(store.subject, store.grade);
+  const note = store.subject === 'geo' ? 'признаки равенства, разбор по шагам'
+    : vg === 7 ? 'по итогам диагностики' : 'новые темы, разбор по шагам';
   app.innerHTML = `
     <h1>Тренажёр</h1>
-    <p class="muted">Алгебра, ${store.grade} класс${store.grade === 7 ? ' · по итогам диагностики' : ' · новые темы, разбор по шагам'}</p>
+    <p class="muted">${subj.title}, ${vg} класс · ${note}</p>
     <div class="card">
       <h2>Как заниматься</h2>
       <ul>
         <li><b>В каждой теме две части:</b> 📖 <b>теория</b> — разбор на примерах, и ✏️ <b>практика</b> — задачи. Практика открывается 🔒, когда пройдёшь теорию до конца.</li>
         <li><b>15–20 минут в день.</b> Одна тема — пока не будет <b>5 верных подряд</b>, потом «Перемешка».</li>
-        <li><b>Прикидывай до того, как считать.</b> Тренажёр спросит: какой будет знак, больше или меньше. Это главный навык — так ловят свои ошибки.</li>
+        <li><b>Прикидывай до того, как считать.</b> Тренажёр спросит: какой будет знак, больше или меньше — а в геометрии какая вершина соответствует. Это главный навык — так ловят свои ошибки.</li>
         <li><b>Проверяй.</b> Где просят проверку — сделай её честно. Если не сошлось, ты <b>сам поймал ошибку</b> — это засчитывается как победа.</li>
         <li>Перед отправкой отметь, уверен ли ты. Цель — чтобы «уверен» почти всегда значило «верно».</li>
       </ul>
@@ -2769,13 +3121,15 @@ function home() {
         задача из ошибника прошла весь цикл повторения до конца +${PTS.journal}, сеанс Петиных ошибок целиком +${PTS.oops}.</p>
     </div>
     <div class="tabs">
-      <button class="grade-tab${store.grade === 7 ? ' on' : ''}" data-gtab="7">7 класс</button>
-      <button class="grade-tab${store.grade === 8 ? ' on' : ''}" data-gtab="8">8 класс</button>
+      ${SUBJECTS.map(sb => `<button class="grade-tab${sb.id === store.subject ? ' on' : ''}" data-stab="${sb.id}">${sb.title}</button>`).join('')}
+    </div>
+    <div class="tabs">
+      ${gradesOf(store.subject).map(g => `<button class="grade-tab${g === vg ? ' on' : ''}" data-gtab="${g}">${g} класс</button>`).join('')}
     </div>
     <div class="mods">
-      ${SECTIONS.map(sec => `<h3 class="sec" data-grade="${sec.grade}">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
+      ${SECTIONS.map(sec => `<h3 class="sec" data-subj="${secSubj(sec)}" data-grade="${sec.grade}">${sec.title}</h3>` + sec.ids.map(id => MODULES.find(m => m.id === id)).map(m => {
         const s = st(m.id), mastered = s.mastered.includes(today()), open = theoryDone(m);
-        return `<div class="mod-card${open ? '' : ' fresh'}" data-grade="${sec.grade}"><b>${m.n}. ${m.title}</b>
+        return `<div class="mod-card${open ? '' : ' fresh'}" data-subj="${secSubj(sec)}" data-grade="${sec.grade}"><b>${m.n}. ${m.title}</b>
           <div class="parts">
             <button class="part theory${open ? ' passed' : ''}" data-theory="${m.id}">📖 Теория${open ? ' ✓' : ''}</button>
             <button class="part practice" data-practice="${m.id}"${open ? '' : ' disabled title="Сначала пройди теорию"'}>${open ? '✏️' : '🔒'} Практика</button>
@@ -2826,11 +3180,18 @@ function home() {
   document.getElementById('copy').onclick = e => copyResults(e.currentTarget);
   document.getElementById('bkp').onclick = e => copyText(e.currentTarget, backupText(), 'Бэкап скопирован ✓ — вставь в заметки');
   document.getElementById('brest').onclick = restoreFromPaste;
-  // Tabs: only the active класс is shown, but the other grade's cards stay in the DOM.
-  app.querySelectorAll('.mods [data-grade]').forEach(el => { el.style.display = +el.dataset.grade === store.grade ? '' : 'none'; });
+  // Tabs: only the active предмет+класс is shown, but the other cards stay in the DOM.
+  app.querySelectorAll('.mods [data-grade]').forEach(el => {
+    el.style.display = el.dataset.subj === store.subject && +el.dataset.grade === vg ? '' : 'none';
+  });
   app.querySelectorAll('[data-gtab]').forEach(b => b.onclick = () => {
-    if (+b.dataset.gtab === store.grade) return;
+    // Кликают по показанному классу, а в памяти мог лежать другой (алгебра 8, геометрия 7).
+    if (+b.dataset.gtab === vg) return;
     store.grade = +b.dataset.gtab; save(); home();
+  });
+  app.querySelectorAll('[data-stab]').forEach(b => b.onclick = () => {
+    if (b.dataset.stab === store.subject) return;
+    store.subject = b.dataset.stab; save(); home();
   });
 }
 
@@ -2966,7 +3327,7 @@ function oopsAnswerTask(mod, wrong, why, meta) {
   if (meta.kind === 'verdict')
     return { _mod: mod, q: oopsCard(wrong) + '<br>Петя прав?', options: ['прав', 'ошибся'], answer: 'ошибся',
       same: v => v === 'ошибся', solution: '<p><b>Петя ошибся.</b> ' + why + '</p>',
-      diagnose: () => 'Проверь Петино равенство числом: подставь и посчитай обе части.' };
+      diagnose: () => meta.diag || 'Проверь Петино равенство числом: подставь и посчитай обе части.' };
   const base = { _mod: mod, answer: meta.fix, q: oopsCard(wrong) + '<br>' + (meta.ask || 'В Петиной записи ошибка. Исправь — напиши, как правильно:'),
     solution: '<p><b>Правильно:</b> ' + (meta.show || meta.fix) + '</p><p>' + why + '</p>' };
   if (meta.kind === 'num') {
@@ -2993,6 +3354,10 @@ function oopsAnswerTask(mod, wrong, why, meta) {
     const T = parseInterval(meta.fix).value;
     Object.assign(base, { parseAns: parseInterval, same: v => v === T,
       diagnose: () => 'Числа остаются те же — меняются только скобки: ≤ и <.' });
+  } else if (meta.kind === 'tri') {
+    const T = parseTri(meta.fix).value;
+    Object.assign(base, { parseAns: parseTri, same: v => v === T, wide: true,
+      diagnose: () => 'Сверяй вершину по двум её сторонам: при паре должны сходиться те же две длины, что при своей.' });
   }
   return base;
 }
@@ -3196,9 +3561,14 @@ function submit(conf) {
   // 2. Did his own check catch the mistake? That is a win, not a failed try.
   const selfCatch = msg => { session.caught = true; return feedback('info', `🕵️ <b>Стоп — ты сам себя поймал!</b> ${msg} Найди, где ошибка, и исправь.`); };
   // Consistency with his own estimate — independent of whether the estimate is right.
-  if (task.predict && task.predict.ref === undefined && signWord(p.value) !== pred)
+  // `agree` is the mode for answers that are not numbers (a correspondence of vertices):
+  // signWord of a string is «ноль», so this branch must be checked before the numeric ones.
+  if (task.predict && task.predict.agree) {
+    if (!task.predict.agree(p.value, pred))
+      return selfCatch(`Ты прикинул «${pred}», а в ответе получилось по-другому. Или прикидка, или ответ — что-то одно неверно.`);
+  } else if (task.predict && task.predict.ref === undefined && signWord(p.value) !== pred)
     return selfCatch(`Ты прикинул, что ответ будет ${pred}, а написал ${fmt(p.value)}. Что-то одно неверно.`);
-  if (task.predict && task.predict.ref !== undefined && !eq(p.value, task.predict.ref)
+  if (task.predict && !task.predict.agree && task.predict.ref !== undefined && !eq(p.value, task.predict.ref)
       && (p.value > task.predict.ref ? 'больше' : 'меньше') !== pred)
     return selfCatch(`Ты прикинул, что ответ будет ${pred}, чем ${fmt(task.predict.ref)}, а написал ${fmt(p.value)}. Что-то одно неверно.`);
   if (task.check && task.check.targetOf) {
@@ -3363,7 +3733,7 @@ const copyResults = btn => copyText(btn, resultsText(), 'Скопировано 
 const BACKUP_V = 1;
 const cksum = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
 const backupText = () => {
-  const j = JSON.stringify({ b: BACKUP_V, grade: store.grade, stats: store.stats, lessons: store.lessons,
+  const j = JSON.stringify({ b: BACKUP_V, grade: store.grade, subject: store.subject, stats: store.stats, lessons: store.lessons,
     days: store.days, mixesDone: store.mixesDone, queue: store.queue, journalOut: store.journalOut, oopsDone: store.oopsDone });
   return `algebra7-backup ${cksum(j)} ${j}`;
 };
